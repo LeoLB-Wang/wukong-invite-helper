@@ -11,6 +11,83 @@
 
 无需手动安装 Python 或任何依赖，双击即跑。脚本会自动完成：安装 uv → 安装 Python → 创建虚拟环境 → 安装依赖 → 启动 Web UI → 打开浏览器。
 
+
+**macOS**
+
+双击 `start.command`（首次运行需右键 → 打开 → 点"打开"确认）
+
+**Windows**
+
+双击 `start.bat`
+
+> 首次启动需下载依赖，约 1-2 分钟；之后秒开。
+
+### macOS 辅助功能权限
+
+如需「自动填入悟空 App」功能，需为 Terminal / iTerm 打开辅助功能权限：
+
+`系统设置 → 隐私与安全性 → 辅助功能` → 勾选你的终端 App
+
+### Windows 额外依赖
+
+Windows 需预装 [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) 及中文语言数据 `chi_sim`。
+
+如果 `tessdata` 不在默认目录，需要配置 `TESSDATA_PREFIX`。
+
+## 命令行启动
+
+适合习惯终端操作的用户。脚本同样会自动安装 `uv` 和配置环境。
+
+### Web UI 模式
+
+```bash
+bash start.command
+```
+
+### CLI Watcher 模式
+
+```bash
+bash scripts/snatch_invite.sh
+```
+
+自定义参数：
+
+```bash
+TIMEOUT_SECONDS=330 INTERVAL=0.5 bash scripts/snatch_invite.sh
+```
+
+禁用自动填入 / 仅填入不提交：
+
+```bash
+AUTO_FILL_APP=0 bash scripts/snatch_invite.sh    # 禁用自动填入
+AUTO_SUBMIT_APP=0 bash scripts/snatch_invite.sh  # 仅填入不提交
+```
+
+## 手动安装（开发者）
+
+如需本地开发或调试，可手动搭建环境：
+
+```bash
+# 1. 创建并激活虚拟环境
+uv venv .venv
+source .venv/bin/activate          # macOS / Linux
+# source .venv/Scripts/activate    # Windows Git Bash
+
+# 2. 安装项目（按平台选择）
+uv pip install -e .                        # macOS
+# uv pip install -e ".[tesseract]"         # Windows / Linux
+# uv pip install -e ".[tesseract,autofill]" # Windows / Linux + 自动填入
+
+# 3. 启动 Web UI
+uv run wukong-invite-webui --host 127.0.0.1 --port 8787
+```
+
+浏览器访问 `http://127.0.0.1:8787`
+
+## 一键启动（推荐）
+
+无需手动安装 Python 或任何依赖，双击即跑。脚本会自动完成：安装 uv → 安装 Python → 创建虚拟环境 → 安装依赖 → 启动 Web UI → 打开浏览器。
+
 **macOS**
 
 双击 `start.command`（首次运行需右键 → 打开 → 点"打开"确认）
