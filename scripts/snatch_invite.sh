@@ -16,6 +16,17 @@ case "$OS_TYPE" in
   *)                    IS_MACOS=0 ;;
 esac
 
+# --------------- auto-install uv ---------------
+if ! command -v uv &>/dev/null; then
+  log "uv not found, installing..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  source "$HOME/.local/bin/env" 2>/dev/null || export PATH="$HOME/.local/bin:$PATH"
+  if ! command -v uv &>/dev/null; then
+    echo "failed to install uv. please install manually: https://docs.astral.sh/uv/" >&2
+    exit 1
+  fi
+fi
+
 # --------------- venv setup ---------------
 if [ ! -d .venv ]; then
   mkdir -p .uv-cache
