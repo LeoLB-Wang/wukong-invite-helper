@@ -2,24 +2,88 @@
 
 [中文](./README.md) | English
 
-A lightweight watcher for Wukong invite images. It polls the official endpoint, OCRs unseen invite images, alerts on success, copies the invite code to the clipboard, and can autofill `Wukong.app` on macOS.
+A lightweight watcher for Wukong invite images. It polls the official endpoint, OCRs unseen invite images, alerts on success, copies the invite code to the clipboard, and autofills `Wukong App` across platforms.
 
-## TL;DR
+> [!IMPORTANT]
+> Before using, download the [Wukong App](https://wukong.com), log in via DingTalk QR scan, and stay on the invite code input page.
 
-- Poll the official `.js` endpoint and parse the latest invite image URL.
-- Process only unseen `asset_id` values recorded in `data/seen_ids.txt`.
-- After OCR succeeds, print the invite code, alert the user, copy it to the clipboard, try to fill `Wukong.app`, and persist the processed `asset_id`.
+## One-Click Launch (Recommended)
 
-## Features
+No need to manually install Python or any dependencies — just double-click.
 
-- Parse JSONP-like invite image payloads such as `img_url({...})`
-- Track processed invite images via `data/seen_ids.txt`
-- OCR invite images on macOS and non-macOS platforms
-- Copy invite codes to the clipboard
-- Play a local alert sound
-- Autofill `Wukong.app` on macOS with AppleScript
-- Retry the same unseen image if OCR fails
-- Provide a local `Web UI` with start, stop, clear-seen-id, and manual retry controls
+The script automatically handles: install uv → install Python → create venv → install deps → launch Web UI → open browser.
+
+**macOS**
+
+Double-click `start.command` (first run: right-click → Open → click "Open" to confirm)
+
+**Windows**
+
+Double-click `start.bat`
+
+> First launch downloads dependencies (~1-2 min); subsequent launches are instant.
+
+### macOS Accessibility Permission
+
+To enable the "autofill Wukong App" feature, grant Accessibility permission to your terminal app:
+
+`System Settings → Privacy & Security → Accessibility` → check your terminal app
+
+### Windows Extra Dependencies
+
+Windows requires [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) with Chinese language data `chi_sim`.
+
+If `tessdata` is not in the default location, set `TESSDATA_PREFIX`.
+
+## Command Line Launch
+
+For users who prefer the terminal. Scripts also auto-install `uv` and configure the environment.
+
+### Web UI Mode
+
+```bash
+bash start.command
+```
+
+### CLI Watcher Mode
+
+```bash
+bash scripts/snatch_invite.sh
+```
+
+Custom parameters:
+
+```bash
+TIMEOUT_SECONDS=330 INTERVAL=0.5 bash scripts/snatch_invite.sh
+```
+
+Disable autofill / fill without submit:
+
+```bash
+AUTO_FILL_APP=0 bash scripts/snatch_invite.sh    # disable autofill
+AUTO_SUBMIT_APP=0 bash scripts/snatch_invite.sh  # fill only, no submit
+```
+
+## Manual Install (Developers)
+
+For local development or debugging:
+
+```bash
+# 1. Create and activate venv
+uv venv .venv
+source .venv/bin/activate          # macOS / Linux
+# source .venv/Scripts/activate    # Windows Git Bash
+
+# 2. Install project (choose by platform)
+uv pip install -e .                        # macOS
+# uv pip install -e ".[tesseract]"         # Windows / Linux
+# uv pip install -e ".[tesseract,autofill]" # Windows / Linux + autofill
+
+# 3. Launch Web UI
+uv run wukong-invite-webui --host 127.0.0.1 --port 8787
+```
+
+Open `http://127.0.0.1:8787` in your browser.
 
 ## Platform Support
 
@@ -28,103 +92,7 @@ A lightweight watcher for Wukong invite images. It polls the official endpoint, 
 | OCR engine | Vision Framework | Tesseract | Tesseract |
 | Clipboard | `pbcopy` | `clip.exe` | `xclip` / `xsel` |
 | Alert sound | `afplay` | `winsound` | terminal bell |
-| Autofill `Wukong.app` | Yes | No | No |
-
-## Requirements
-
-### Common
-
-- Python `3.11+`
-- [uv](https://docs.astral.sh/uv/)
-
-### macOS
-
-- Xcode Command Line Tools
-- Accessibility permission for Terminal / iTerm and `Wukong.app` automation if you want autofill
-  Path:
-  `System Settings -> Privacy & Security -> Accessibility`
-  On older macOS versions:
-  `System Preferences -> Security & Privacy -> Privacy -> Accessibility`
-
-### Windows
-
-- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki)
-- Chinese language data `chi_sim`
-- Git Bash or MSYS2
-
-If `tessdata` is not installed in the default location, set `TESSDATA_PREFIX`.
-
-## Installation
-
-### 1. Create the local virtual environment
-
-```bash
-uv venv .venv
-```
-
-### 2. Activate the environment
-
-macOS / Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows Git Bash / MSYS2:
-
-```bash
-source .venv/Scripts/activate
-```
-
-### 3. Install the project
-
-macOS:
-
-```bash
-uv pip install -e .
-```
-
-Windows / Linux with Tesseract:
-
-```bash
-uv pip install -e ".[tesseract]"
-```
-
-## Quick Start
-
-### macOS
-
-```bash
-TIMEOUT_SECONDS=330 INTERVAL=0.5 AUTO_FILL_APP=1 AUTO_SUBMIT_APP=0 ENABLE_SOUND=1 bash scripts/snatch_invite.sh
-```
-
-### Windows
-
-`fill-app` is skipped automatically:
-
-```bash
-TIMEOUT_SECONDS=330 INTERVAL=0.5 AUTO_FILL_APP=0 ENABLE_SOUND=1 bash scripts/snatch_invite.sh
-```
-
-### Start the local Web UI
-
-```bash
-source .venv/bin/activate
-uv run python -m wukong_invite.webui --host 127.0.0.1 --port 8787
-```
-
-After installation, you can also run:
-
-```bash
-source .venv/bin/activate
-uv run wukong-invite-webui --host 127.0.0.1 --port 8787
-```
-
-Open in your browser:
-
-```text
-http://127.0.0.1:8787
-```
+| Autofill Wukong App | osascript + System Events | pyautogui | pyautogui |
 
 ## How It Works
 
@@ -140,36 +108,28 @@ https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js
 img_url({"img_url":"https://gw.alicdn.com/imgextra/...png"})
 ```
 
-3. Extract the numeric invite image `asset_id` from the image URL.
+3. Extract the numeric `asset_id` from the image URL.
 4. Compare the `asset_id` against `data/seen_ids.txt`.
-5. If the `asset_id` is unseen, download the image and run OCR.
+5. If unseen, download the image and run OCR.
 6. If OCR succeeds:
-   - print the invite code
-   - copy it to the clipboard
-   - play an alert
-   - try to autofill `Wukong.app` on macOS
-   - append the `asset_id` to `data/seen_ids.txt`
+   - Print the invite code
+   - Copy to clipboard
+   - Play an alert
+   - Autofill Wukong App and submit
+   - Append `asset_id` to `data/seen_ids.txt`
 7. If OCR fails, keep the `asset_id` eligible for retry.
 
 ## `seen_ids.txt` Behavior
 
-The file `data/seen_ids.txt` stores processed invite image IDs, one per line.
-
-Important behavior:
+`data/seen_ids.txt` stores processed invite image IDs, one per line.
 
 - Only successful OCR results are persisted
 - Failed OCR does not mark the `asset_id` as seen
-- If you delete an `asset_id` manually, the current image becomes eligible for processing again
-
-Successful persistence logs look like this:
-
-```text
-[wukong-invite-helper] saved seen asset id [6000000009999] to /path/to/data/seen_ids.txt
-```
+- Manually deleting an `asset_id` makes that image eligible for reprocessing
 
 ## Configuration
 
-The main entrypoint is `scripts/snatch_invite.sh`.
+CLI Watcher is configured via environment variables (`scripts/snatch_invite.sh`):
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -177,133 +137,81 @@ The main entrypoint is `scripts/snatch_invite.sh`.
 | `TIMEOUT_SECONDS` | `300` | Max watcher runtime |
 | `ENABLE_CLIPBOARD` | `1` | Copy invite code to clipboard |
 | `ENABLE_SOUND` | `1` | Play alert sound |
-| `SOUND_NAME` | `Glass` | macOS sound name |
-| `AUTO_FILL_APP` | `1` | Try to autofill `Wukong.app` on macOS |
-| `AUTO_SUBMIT_APP` | `0` | Click `立即体验` after filling |
-| `SEEN_IDS_FILE` | `data/seen_ids.txt` | Override the seen-id storage file |
+| `SOUND_NAME` | `Glass` | macOS alert sound name |
+| `AUTO_FILL_APP` | `1` | Autofill Wukong App |
+| `AUTO_SUBMIT_APP` | `1` | Press Enter after filling |
+| `SEEN_IDS_FILE` | `data/seen_ids.txt` | Override seen-id storage file |
 
 ## OCR Strategy
 
-OCR implementation lives in `src/wukong_invite/ocr.py`.
+OCR implementation: `src/wukong_invite/ocr.py`.
 
-Current behavior:
-
-- Preprocess the input image by compositing alpha onto a black background
-- Try OCR on generated candidate images first
+- Preprocess image via alpha compositing
+- Try OCR on candidate preprocessed images first
 - Fall back to OCR on the original image
-- Use `VisionOCR` on macOS
-- Use `TesseractOCR` on non-macOS platforms
+- macOS: `VisionOCR`
+- Non-macOS: `TesseractOCR`
 
-Invite code parsing lives in `src/wukong_invite/core.py`.
+Invite code extraction: `src/wukong_invite/core.py`.
 
-Current extraction rules:
+- Prefer labeled text like `当前邀请码：xxxxx` or `邀请码：xxxxx`
+- Accept a unique 5-character Chinese token if no label found
+- Filter known UI text like `已领完`, `欢迎回来`, `立即体验`
+- Mixed alphanumeric fallback for older formats
 
-- Prefer labeled text such as `当前邀请码：xxxxx` or `邀请码：xxxxx`
-- If no label exists, accept a unique 5-character Chinese token
-- Filter known UI text such as `已领完`, `欢迎回来`, `立即体验`
-- Keep a mixed alphanumeric fallback for older formats
-
-## Commands
-
-### Run the full watcher
+## Common Commands
 
 ```bash
-bash scripts/snatch_invite.sh
-```
-
-### Start the Web UI
-
-```bash
-source .venv/bin/activate
-uv run python -m wukong_invite.webui
-```
-
-### Parse the image URL from stdin
-
-```bash
-source .venv/bin/activate
-uv run python -m wukong_invite.ops parse-js
-```
-
-### Extract the invite code from a local image
-
-```bash
-source .venv/bin/activate
+# OCR a local image
 uv run python -m wukong_invite.ops extract-code --image scratch/wukong-new.png
-```
 
-### Fill `Wukong.app` only
-
-```bash
-source .venv/bin/activate
+# Test autofill (no submit)
 uv run python -m wukong_invite.ops fill-app --code 春江花月夜 --no-submit
+
+# Test autofill + submit
+uv run python -m wukong_invite.ops fill-app --code 春江花月夜
+
+# Run tests
+uv run python -m unittest discover -s tests
 ```
 
 ## Troubleshooting
 
-### No invite code is printed
-
-Check:
-
-- whether the latest image is actually new
-- whether the current `asset_id` is already present in `data/seen_ids.txt`
-- whether OCR can extract text from the current image
-
-To force reprocessing, delete the corresponding line from `data/seen_ids.txt`.
-
-### OCR fails repeatedly
-
-Common causes:
-
-- the white text is too faint
-- the invite image format changed
-- `Tesseract` Chinese language data is missing on non-macOS systems
-
-### `Wukong.app` is not filled on macOS
-
-Check:
-
-- `Wukong.app` is installed
-- the underlying process is still `DingTalkReal`
-- Terminal has Accessibility permission
-- the invite page is open and contains an editable text field
-
-### `python is not using project .venv`
-
-The shell script requires the local environment. Re-run:
-
-```bash
-uv venv .venv
-source .venv/bin/activate
-uv pip install -e .
-```
+| Symptom | What to check |
+|---|---|
+| No invite code printed | Check if `asset_id` is already in `data/seen_ids.txt`; delete the line to force retry |
+| OCR keeps failing | Faint white text / image format changed / missing Tesseract Chinese data on non-macOS |
+| macOS autofill not working | Confirm Terminal has Accessibility permission; confirm Wukong App is open with input field visible |
+| Windows autofill not working | Confirm pyautogui is installed; confirm window title contains "Wukong" |
+| `python is not using project .venv` | Re-run `uv venv .venv && source .venv/bin/activate && uv pip install -e .` |
 
 ## Verification
 
-Run tests:
-
 ```bash
-source .venv/bin/activate
 uv run python -m unittest discover -s tests
 ```
 
-At the time of writing, the local suite passes with `25` tests.
+Current local test suite: `25` tests, all passing.
 
 ## Project Structure
 
-- `scripts/snatch_invite.sh`: main watcher entrypoint
+- `start.command`: macOS one-click launcher (double-click)
+- `start.bat`: Windows one-click launcher (double-click)
+- `scripts/snatch_invite.sh`: CLI watcher entrypoint
+- `src/wukong_invite/webui.py`: Web UI server
 - `src/wukong_invite/core.py`: payload parsing and invite-code extraction
-- `src/wukong_invite/ocr.py`: OCR engines and preprocessing flow
+- `src/wukong_invite/ocr.py`: OCR engines and preprocessing
+- `src/wukong_invite/autofill.py`: cross-platform autofill (macOS osascript / Windows pyautogui)
 - `src/wukong_invite/ops.py`: operational CLI helpers
 - `src/wukong_invite/cli.py`: Python watcher entrypoint
 - `tests/test_core.py`: unit tests
 
 ## Known Limitations
 
-- OCR accuracy depends on the invite image quality
-- `Wukong.app` autofill is macOS-only
-- UI automation depends on the current app structure and process name
+- OCR accuracy depends on invite image quality
+- macOS autofill requires osascript + Accessibility permission
+- Windows/Linux autofill requires pyautogui (extra install)
 
 ## License
 
-This project is licensed under the [MIT License](./LICENSE).
+Licensed under the [MIT License](./LICENSE).
