@@ -6,6 +6,7 @@ import re
 
 _CALLBACK_RE = re.compile(r"^\s*[A-Za-z_]\w*\((.*)\)\s*;?\s*$", re.DOTALL)
 _IMG_URL_RE = re.compile(r"https?://[^\s\"']+\.(?:png|jpg|jpeg|webp)(?:\?[^\s\"']*)?", re.IGNORECASE)
+_IMAGE_ASSET_ID_RE = re.compile(r"(\d+)-\d+-tps-\d+-\d+\.(?:png|jpg|jpeg|webp)(?:\?|$)", re.IGNORECASE)
 _INVITE_CODE_PATTERNS = [
     re.compile(r"当前邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
     re.compile(r"邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
@@ -44,6 +45,14 @@ def parse_js_payload(payload: str) -> str:
         if isinstance(value, str) and value.startswith(("http://", "https://")):
             return value
     raise ValueError("Could not find image URL in payload")
+
+
+def extract_image_asset_id(image_url: str) -> str:
+    """Extract the numeric asset id from an invite image URL."""
+    match = _IMAGE_ASSET_ID_RE.search(image_url)
+    if not match:
+        raise ValueError("Could not extract image asset id from image URL")
+    return match.group(1)
 
 
 def extract_invite_code(text: str) -> str:

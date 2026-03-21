@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from wukong_invite.core import extract_invite_code, parse_js_payload
+from wukong_invite.core import extract_image_asset_id, extract_invite_code, parse_js_payload
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ocr import create_ocr
 
@@ -22,6 +22,11 @@ def cmd_extract_code(image: str) -> int:
     ocr = create_ocr(project_root)
     text = ocr.recognize_text(Path(image), project_root)
     print(extract_invite_code(text))
+    return 0
+
+
+def cmd_image_key(url: str) -> int:
+    print(extract_image_asset_id(url))
     return 0
 
 
@@ -103,6 +108,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("parse-js", help="Read JSONP payload from stdin and print the image URL")
 
+    image_key_parser = subparsers.add_parser("image-key", help="Extract the numeric asset id from an invite image URL")
+    image_key_parser.add_argument("--url", required=True, help="Invite image URL")
+
     extract_parser = subparsers.add_parser("extract-code", help="OCR an image and print the invite code")
     extract_parser.add_argument("--image", required=True, help="Path to the invite image")
 
@@ -126,6 +134,8 @@ def main() -> int:
         return cmd_parse_js()
     if args.command == "extract-code":
         return cmd_extract_code(args.image)
+    if args.command == "image-key":
+        return cmd_image_key(args.url)
     if args.command == "notify":
         return cmd_notify(args.code, args.no_clipboard, args.no_sound, args.sound_name)
     if args.command == "fill-app":

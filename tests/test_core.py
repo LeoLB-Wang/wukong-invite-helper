@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from wukong_invite.core import extract_invite_code, parse_js_payload
+from wukong_invite.core import extract_image_asset_id, extract_invite_code, parse_js_payload
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ops import cmd_fill_app
 from wukong_invite.ocr import VisionOCR, TesseractOCR, create_ocr
@@ -26,6 +26,17 @@ class ParseJsPayloadTests(unittest.TestCase):
     def test_parse_plain_text_fallback(self) -> None:
         payload = "see image https://example.com/code.png now"
         self.assertEqual(parse_js_payload(payload), "https://example.com/code.png")
+
+    def test_extract_image_asset_id_from_img_url(self) -> None:
+        image_url = (
+            "https://gw.alicdn.com/imgextra/i2/"
+            "O1CN01No3bjS1tzEQxQUg4t_!!6000000005972-2-tps-1773-540.png"
+        )
+        self.assertEqual(extract_image_asset_id(image_url), "6000000005972")
+
+    def test_extract_image_asset_id_rejects_unknown_pattern(self) -> None:
+        with self.assertRaises(ValueError):
+            extract_image_asset_id("https://example.com/invite.png")
 
 
 class ExtractInviteCodeTests(unittest.TestCase):
@@ -119,8 +130,8 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(cmd_fill_app("春江花月夜", no_submit=False), 0)
         command = run_mock.call_args.args[0]
         self.assertEqual(command[0], "osascript")
-        self.assertIn('click button "立即体验"', command[2])
-        self.assertIn("春江花月夜", command[2])
+        self.assertIn("立即体验", command[2])
+        self.assertEqual(command[3], "春江花月夜")
 
     @patch("wukong_invite.ops.platform.system", return_value="Darwin")
     @patch("wukong_invite.ops.subprocess.run")
@@ -128,8 +139,8 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(cmd_fill_app("春江花月夜", no_submit=True), 0)
         command = run_mock.call_args.args[0]
         self.assertEqual(command[0], "osascript")
-        self.assertNotIn('click button "立即体验"', command[2])
-        self.assertIn("春江花月夜", command[2])
+        self.assertNotIn("立即体验", command[2])
+        self.assertEqual(command[3], "春江花月夜")
 
 
 class SnatchInviteScriptTests(unittest.TestCase):
