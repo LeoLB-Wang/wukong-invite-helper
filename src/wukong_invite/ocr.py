@@ -3,16 +3,44 @@ from __future__ import annotations
 import abc
 import os
 import platform
+import re
 import shutil
 import subprocess
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageEnhance
+
+# Invite code is known to be exactly 5 CJK characters.
+_CJK_5_RE = re.compile(r"[\u4e00-\u9fff]{5}")
+
+_OCR_CJK_STOP_WORDS = {
+    "限量邀请码",
+    "当前邀请码",
+    "欢迎回来吧",
+    "立即体验吧",
+    "退出登录吧",
+    "悟空官网获得",
+}
+
+
+def _has_cjk(text: str) -> bool:
+    """Return True if *text* contains at least one CJK Unified Ideograph."""
+    return any("\u4e00" <= c <= "\u9fff" for c in text)
+
+
+def _count_cjk5_tokens(text: str) -> int:
+    """Count distinct 5-char CJK tokens that are not stop words."""
+    tokens = {t for t in _CJK_5_RE.findall(text) if t not in _OCR_CJK_STOP_WORDS}
+    return len(tokens)
 
 
 def _preprocess_alpha(image_path: Path, temp_dir: Path) -> list[Path]:
-    """Composite RGBA onto black background to reveal semi-transparent white text."""
+    """Composite RGBA onto black background to reveal semi-transparent white text.
+
+    Returns multiple candidate images; more aggressively enhanced variants are
+    appended for Tesseract to cope with faint / low-contrast text on Windows.
+    """
     img = Image.open(image_path)
     if img.mode != "RGBA":
         img = img.convert("RGBA")
@@ -20,25 +48,43 @@ def _preprocess_alpha(image_path: Path, temp_dir: Path) -> list[Path]:
     w, h = img.size
     candidates: list[Path] = []
 
-    # candidate 1: full image composited on black, inverted → dark text on white
+    # --- base composites ------------------------------------------------
     black_bg = Image.new("RGBA", (w, h), (0, 0, 0, 255))
     composite = Image.alpha_composite(black_bg, img)
     gray = composite.convert("L")
     inverted = gray.point(lambda p: 255 - p)
-    p1 = temp_dir / "alpha_full_inverted.png"
-    inverted.save(str(p1))
-    candidates.append(p1)
 
-    # candidate 2: upper 35% crop, composited on black, inverted, 2x upscale
     upper_h = int(h * 0.35)
     upper_img = img.crop((0, 0, w, upper_h))
     upper_black = Image.new("RGBA", (w, upper_h), (0, 0, 0, 255))
     upper_comp = Image.alpha_composite(upper_black, upper_img)
     upper_inv = upper_comp.convert("L").point(lambda p: 255 - p)
+
+    # candidate 1: full image composited on black, inverted → dark text on white
+    p1 = temp_dir / "alpha_full_inverted.png"
+    inverted.save(str(p1))
+    candidates.append(p1)
+
+    # candidate 2: upper 35% crop, composited on black, inverted, 2x upscale
     scaled = upper_inv.resize((w * 2, upper_h * 2), Image.LANCZOS)
     p2 = temp_dir / "alpha_upper_inverted_2x.png"
     scaled.save(str(p2))
     candidates.append(p2)
+
+    # candidate 3: full image – high contrast + binarise (helps faint text)
+    enhanced = ImageEnhance.Contrast(inverted).enhance(3.0)
+    binarized = enhanced.point(lambda p: 255 if p > 100 else 0)
+    p3 = temp_dir / "alpha_full_contrast_bin.png"
+    binarized.save(str(p3))
+    candidates.append(p3)
+
+    # candidate 4: upper crop – high contrast + binarise + 3× upscale
+    upper_enh = ImageEnhance.Contrast(upper_inv).enhance(3.0)
+    upper_bin = upper_enh.point(lambda p: 255 if p > 100 else 0)
+    upper_bin_scaled = upper_bin.resize((w * 3, upper_h * 3), Image.LANCZOS)
+    p4 = temp_dir / "alpha_upper_contrast_bin_3x.png"
+    upper_bin_scaled.save(str(p4))
+    candidates.append(p4)
 
     return candidates
 
@@ -51,17 +97,48 @@ class OCREngine(abc.ABC):
         """Run OCR on a single image and return raw text."""
 
     def recognize_text(self, image_path: Path, project_root: Path) -> str:
-        """Preprocess and try candidates, then fall back to the original image."""
+        """Preprocess, try every candidate, and return the best result.
+
+        Scoring (highest wins):
+          3 — text contains exactly one 5-char CJK token (perfect invite code)
+          2 — text contains CJK characters (partially useful)
+          1 — text is non-empty but no CJK
+          0 — empty
+
+        All candidates are evaluated; we short-circuit only on score 3.
+        """
         runtime_dir = project_root / ".cache" / "ocr-runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
+
+        best_text: str = ""
+        best_score: int = 0
+
+        def _score(text: str) -> int:
+            if not text.strip():
+                return 0
+            n = _count_cjk5_tokens(text)
+            if n == 1:
+                return 3          # perfect — exactly one invite-code candidate
+            if _has_cjk(text):
+                return 2          # has CJK but ambiguous
+            return 1              # non-empty, no CJK (likely garbage)
+
         with tempfile.TemporaryDirectory(prefix="wukong-preprocess-", dir=runtime_dir) as temp_dir:
             for candidate_path in _preprocess_alpha(image_path, Path(temp_dir)):
                 text = self._recognize(candidate_path)
-                if text.strip():
-                    return text
+                s = _score(text)
+                if s > best_score:
+                    best_score = s
+                    best_text = text
+                if best_score == 3:
+                    return best_text       # can't do better
 
         # Fallback: OCR on original image
-        return self._recognize(image_path)
+        text = self._recognize(image_path)
+        s = _score(text)
+        if s > best_score:
+            best_text = text
+        return best_text
 
 
 class VisionOCR(OCREngine):
@@ -111,16 +188,21 @@ class VisionOCR(OCREngine):
 
 
 class TesseractOCR(OCREngine):
-    """Tesseract-based OCR engine (cross-platform, requires pytesseract + Tesseract binary)."""
+    """Tesseract-based OCR engine (cross-platform, requires pytesseract + Tesseract binary).
 
-    def __init__(self, lang: str = "chi_sim+eng") -> None:
+    Defaults to *chi_sim* only (no eng) and ``--psm 7`` (single text line)
+    because the invite code is known to be exactly 5 CJK characters.
+    """
+
+    def __init__(self, lang: str = "chi_sim", psm: int = 7) -> None:
         self.lang = lang
+        self.config = f"--psm {psm}"
 
     def _recognize(self, image_path: Path) -> str:
         import pytesseract
 
         img = Image.open(image_path)
-        return pytesseract.image_to_string(img, lang=self.lang)
+        return pytesseract.image_to_string(img, lang=self.lang, config=self.config)
 
 
 def create_ocr(project_root: Path) -> OCREngine:

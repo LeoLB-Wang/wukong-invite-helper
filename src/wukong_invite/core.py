@@ -58,11 +58,14 @@ def extract_image_asset_id(image_url: str) -> str:
 def extract_invite_code(text: str) -> str:
     """Extract the value following '当前邀请码' from OCR text."""
     normalized = text.replace("\u3000", " ")
+
+    # --- Priority 1: labelled pattern (most reliable) ---
     for pattern in _INVITE_CODE_PATTERNS:
         match = pattern.search(normalized)
         if match:
             return match.group(1).strip()
 
+    # --- Priority 2: single 5-char CJK token ---
     cjk_candidates: list[str] = []
     for token in _CJK_TOKEN_RE.findall(normalized):
         stripped = token.strip()
@@ -72,13 +75,20 @@ def extract_invite_code(text: str) -> str:
     if len(unique_cjk_candidates) == 1:
         return unique_cjk_candidates[0]
 
-    candidates: list[str] = []
-    for token in _TOKEN_RE.findall(normalized):
-        has_letter = any(ch.isalpha() for ch in token)
-        has_digit = any(ch.isdigit() for ch in token)
-        if has_letter and has_digit:
-            candidates.append(token.strip())
-    unique_candidates = list(dict.fromkeys(candidates))
-    if len(unique_candidates) == 1:
-        return unique_candidates[0]
+    # --- Priority 3: mixed alpha-numeric token (≥6 chars) ---
+    # Guard: only attempt this when the OCR text contains at least *some*
+    # CJK characters, proving the engine captured real content rather than
+    # garbage from a faint / unreadable image.
+    has_cjk = any("\u4e00" <= c <= "\u9fff" for c in normalized)
+    if has_cjk:
+        candidates: list[str] = []
+        for token in _TOKEN_RE.findall(normalized):
+            has_letter = any(ch.isalpha() for ch in token)
+            has_digit = any(ch.isdigit() for ch in token)
+            if has_letter and has_digit:
+                candidates.append(token.strip())
+        unique_candidates = list(dict.fromkeys(candidates))
+        if len(unique_candidates) == 1:
+            return unique_candidates[0]
+
     raise ValueError("Could not find invite code in OCR text")

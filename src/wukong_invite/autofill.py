@@ -15,14 +15,22 @@ from wukong_invite.notify import copy_to_clipboard
 
 
 def activate_wukong_window() -> None:
-    """Bring the Wukong window to the foreground (Windows only)."""
+    """Bring the Wukong window to the foreground (Windows only).
+
+    Uses substring matching via *pygetwindow*, but filters out windows whose
+    title contains "Invite Helper" to avoid accidentally activating the WebUI
+    browser tab instead of the real Wukong desktop application.
+    """
     system = platform.system()
     if system == "Windows":
         import pygetwindow as gw  # type: ignore[import-untyped]
 
-        windows = gw.getWindowsWithTitle("Wukong")
-        if windows:
-            windows[0].activate()
+        all_matches = gw.getWindowsWithTitle("Wukong")
+        # Exclude the WebUI browser window ("Wukong Invite Helper")
+        app_windows = [w for w in all_matches if "Invite Helper" not in (w.title or "")]
+        target = app_windows or all_matches
+        if target:
+            target[0].activate()
         else:
             raise RuntimeError("Wukong window not found")
     else:
