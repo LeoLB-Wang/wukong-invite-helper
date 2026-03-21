@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import platform
-import subprocess
 import sys
 from pathlib import Path
 
@@ -45,60 +43,15 @@ def cmd_notify(code: str, no_clipboard: bool, no_sound: bool, sound_name: str) -
 
 
 def cmd_fill_app(code: str, no_submit: bool) -> int:
-    if platform.system() != "Darwin":
-        print("fill-app is only supported on macOS", file=sys.stderr)
+    try:
+        from wukong_invite.autofill import fill_and_submit
+        fill_and_submit(code, submit=not no_submit)
+    except ImportError:
+        print(
+            "pyautogui is not installed. Install with: pip install wukong-invite-helper[autofill]",
+            file=sys.stderr,
+        )
         return 1
-
-    submit_line = (
-        """
-        repeat 20 times
-            if exists (first button of front window whose name is "立即体验") then
-                exit repeat
-            end if
-            delay 0.2
-        end repeat
-        click (first button of front window whose name is "立即体验")
-        """
-        if not no_submit
-        else ""
-    )
-
-    script = f"""
-on run argv
-set inviteCode to item 1 of argv
-set the clipboard to inviteCode
-tell application "Wukong" to activate
-delay 0.8
-tell application "System Events"
-    tell process "DingTalkReal"
-        set frontmost to true
-        repeat 20 times
-            if exists front window then
-                exit repeat
-            end if
-            delay 0.2
-        end repeat
-        repeat 20 times
-            if (count of text fields of front window) > 0 then
-                exit repeat
-            end if
-            delay 0.2
-        end repeat
-        set targetField to text field 1 of front window
-        click targetField
-        delay 0.3
-        keystroke "a" using command down
-        delay 0.2
-        key code 51
-        delay 0.2
-        keystroke "v" using command down
-        delay 0.4
-{submit_line}
-    end tell
-end tell
-end run
-"""
-    subprocess.run(["osascript", "-e", script, code], check=True)
     return 0
 
 
@@ -120,7 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     notify_parser.add_argument("--no-sound", action="store_true", help="Do not play an alert sound")
     notify_parser.add_argument("--sound-name", default="Glass", help="macOS sound file name without extension")
 
-    fill_parser = subparsers.add_parser("fill-app", help="Fill the invite code into Wukong.app (macOS only)")
+    fill_parser = subparsers.add_parser("fill-app", help="Fill the invite code into Wukong app via keyboard simulation")
     fill_parser.add_argument("--code", required=True, help="Invite code to fill")
     fill_parser.add_argument("--no-submit", action="store_true", help="Fill only, do not click submit")
 

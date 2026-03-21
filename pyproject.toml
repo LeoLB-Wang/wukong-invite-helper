@@ -9,10 +9,14 @@ dependencies = [
 
 [project.optional-dependencies]
 tesseract = ["pytesseract"]
+autofill = ["pyautogui"]
 
 [project.urls]
 Homepage = "https://github.com/LeoLB-Wang/wukong-invite-helper"
 Repository = "https://github.com/LeoLB-Wang/wukong-invite-helper"
+
+[project.scripts]
+wukong-invite-webui = "wukong_invite.webui:main"
 
 [build-system]
 requires = ["setuptools>=68"]

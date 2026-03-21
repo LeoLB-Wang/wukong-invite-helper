@@ -25,3 +25,6 @@ test.png
 *.log
 *.tmp
 *.swp
+
+# Runtime data
+data/

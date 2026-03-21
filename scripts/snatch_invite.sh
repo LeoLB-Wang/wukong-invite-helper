@@ -45,10 +45,26 @@ ENABLE_CLIPBOARD="${ENABLE_CLIPBOARD:-1}"
 ENABLE_SOUND="${ENABLE_SOUND:-1}"
 SOUND_NAME="${SOUND_NAME:-Glass}"
 AUTO_FILL_APP="${AUTO_FILL_APP:-1}"
-AUTO_SUBMIT_APP="${AUTO_SUBMIT_APP:-0}"
+AUTO_SUBMIT_APP="${AUTO_SUBMIT_APP:-1}"
 DEADLINE=$(( $(date +%s) + TIMEOUT_SECONDS ))
-LAST_IMAGE_URL=""
 ATTEMPT=0
+
+# --------------- seen asset IDs (file-backed) ---------------
+SEEN_IDS_FILE="${SEEN_IDS_FILE:-$ROOT_DIR/data/seen_ids.txt}"
+mkdir -p "$(dirname "$SEEN_IDS_FILE")"
+touch "$SEEN_IDS_FILE"
+
+declare -A SEEN_IDS
+_LOADED_COUNT=0
+while IFS= read -r _line; do
+  _line="${_line%%#*}"
+  _line="$(echo "$_line" | tr -d '[:space:]')"
+  if [ -n "$_line" ]; then
+    SEEN_IDS["$_line"]=1
+    _LOADED_COUNT=$((_LOADED_COUNT + 1))
+  fi
+done < "$SEEN_IDS_FILE"
+log "loaded ${_LOADED_COUNT} seen id(s) from $SEEN_IDS_FILE"
 
 # --------------- temp dir helper ---------------
 make_tmp_dir() {
@@ -67,40 +83,52 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   log "poll attempt #${ATTEMPT}"
   if PAYLOAD="$(curl -fsSL -H 'Cache-Control: no-cache' "$JS_URL" 2>/dev/null)"; then
     if IMAGE_URL="$(printf '%s' "$PAYLOAD" | python -m wukong_invite.ops parse-js 2>/dev/null)"; then
-      if [ -n "$IMAGE_URL" ] && [ "$IMAGE_URL" != "$LAST_IMAGE_URL" ]; then
-        LAST_IMAGE_URL="$IMAGE_URL"
-        log "detected new image url"
-        TMP_DIR="$(make_tmp_dir)"
-        IMAGE_PATH="$TMP_DIR/invite.png"
-        if curl -fsSL -H 'Cache-Control: no-cache' -o "$IMAGE_PATH" "$IMAGE_URL" 2>/dev/null; then
-          if CODE="$(python -m wukong_invite.ops extract-code --image "$IMAGE_PATH" 2>/dev/null)"; then
-            log "ocr extracted invite code successfully"
-            NOTIFY_ARGS=(--code "$CODE" --sound-name "$SOUND_NAME")
-            if [ "$ENABLE_CLIPBOARD" != "1" ]; then
-              NOTIFY_ARGS+=(--no-clipboard)
-            fi
-            if [ "$ENABLE_SOUND" != "1" ]; then
-              NOTIFY_ARGS+=(--no-sound)
-            fi
-            python -m wukong_invite.ops notify "${NOTIFY_ARGS[@]}" >/dev/null 2>&1 || true
-            if [ "$IS_MACOS" = "1" ] && [ "$AUTO_FILL_APP" = "1" ]; then
-              FILL_ARGS=(--code "$CODE")
-              if [ "$AUTO_SUBMIT_APP" != "1" ]; then
-                FILL_ARGS+=(--no-submit)
-              fi
-              python -m wukong_invite.ops fill-app "${FILL_ARGS[@]}" >/dev/null 2>&1 || true
-            fi
-            printf '%s\n' "$CODE"
-            rm -rf "$TMP_DIR"
-            exit 0
-          fi
-          log "ocr did not return a usable invite code"
+      if [ -n "$IMAGE_URL" ]; then
+        ASSET_ID="$(python -m wukong_invite.ops image-key --url "$IMAGE_URL" 2>/dev/null)" || ASSET_ID=""
+        if [ -z "$ASSET_ID" ]; then
+          log "failed to extract asset id from image url"
+        elif [ -n "${SEEN_IDS[$ASSET_ID]+_}" ]; then
+          log "asset id [${ASSET_ID}] already seen"
         else
-          log "failed to download invite image"
+          log "detected new asset id [${ASSET_ID}]"
+          TMP_DIR="$(make_tmp_dir)"
+          IMAGE_PATH="$TMP_DIR/invite.png"
+          SHOULD_MARK_SEEN=1
+          if curl -fsSL -H 'Cache-Control: no-cache' -o "$IMAGE_PATH" "$IMAGE_URL" 2>/dev/null; then
+            if CODE="$(python -m wukong_invite.ops extract-code --image "$IMAGE_PATH" 2>/dev/null)"; then
+              log "ocr extracted invite code successfully"
+              SEEN_IDS["$ASSET_ID"]=1
+              echo "$ASSET_ID" >> "$SEEN_IDS_FILE"
+              log "saved seen asset id [${ASSET_ID}] to $SEEN_IDS_FILE"
+              NOTIFY_ARGS=(--code "$CODE" --sound-name "$SOUND_NAME")
+              if [ "$ENABLE_CLIPBOARD" != "1" ]; then
+                NOTIFY_ARGS+=(--no-clipboard)
+              fi
+              if [ "$ENABLE_SOUND" != "1" ]; then
+                NOTIFY_ARGS+=(--no-sound)
+              fi
+              python -m wukong_invite.ops notify "${NOTIFY_ARGS[@]}" >/dev/null 2>&1 || true
+              if [ "$AUTO_FILL_APP" = "1" ]; then
+                FILL_ARGS=(--code "$CODE")
+                if [ "$AUTO_SUBMIT_APP" != "1" ]; then
+                  FILL_ARGS+=(--no-submit)
+                fi
+                python -m wukong_invite.ops fill-app "${FILL_ARGS[@]}" >/dev/null 2>&1 || true
+              fi
+              printf '%s\n' "$CODE"
+              rm -rf "$TMP_DIR"
+              exit 0
+            fi
+            log "ocr did not return a usable invite code"
+            SHOULD_MARK_SEEN=0
+          else
+            log "failed to download invite image"
+          fi
+          rm -rf "$TMP_DIR"
+          if [ "$SHOULD_MARK_SEEN" != "1" ]; then
+            log "keeping asset id [${ASSET_ID}] eligible for retry"
+          fi
         fi
-        rm -rf "$TMP_DIR"
-      elif [ -n "$IMAGE_URL" ]; then
-        log "image url unchanged"
       else
         log "parsed image url was empty"
       fi
