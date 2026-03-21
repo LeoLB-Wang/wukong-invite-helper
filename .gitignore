@@ -1,0 +1,27 @@
+.DS_Store
+
+# Python environment and caches
+.venv/
+.uv-cache/
+.pytest_cache/
+.cache/
+__pycache__/
+*.py[cod]
+
+# Packaging artifacts
+*.egg-info/
+dist/
+build/
+
+# Editor metadata
+.idea/
+.vscode/
+
+# Local experiments and debug assets
+scratch/
+test.png
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp

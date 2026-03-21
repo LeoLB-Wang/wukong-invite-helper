@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import json
+import re
+
+
+_CALLBACK_RE = re.compile(r"^\s*[A-Za-z_]\w*\((.*)\)\s*;?\s*$", re.DOTALL)
+_IMG_URL_RE = re.compile(r"https?://[^\s\"']+\.(?:png|jpg|jpeg|webp)(?:\?[^\s\"']*)?", re.IGNORECASE)
+_INVITE_CODE_PATTERNS = [
+    re.compile(r"当前邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
+    re.compile(r"邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
+    re.compile(r"当前邀请码\s*[:：]?\s*([\u4e00-\u9fff]{4,8})"),
+    re.compile(r"邀请码\s*[:：]?\s*([\u4e00-\u9fff]{4,8})"),
+]
+_TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{6,}\b")
+_CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{4,8}")
+_CJK_STOP_WORDS = {
+    "限量",
+    "已领完",
+    "欢迎回来",
+    "立即体验",
+    "退出登录",
+    "刷新验证",
+    "客服咨询",
+    "悟空官网获得",
+    "悟空出世",
+}
+
+
+def parse_js_payload(payload: str) -> str:
+    """Extract the image URL from the JSONP-like response."""
+    match = _CALLBACK_RE.match(payload)
+    body = match.group(1) if match else payload
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        image_match = _IMG_URL_RE.search(payload)
+        if not image_match:
+            raise ValueError("Could not parse image URL from payload") from None
+        return image_match.group(0)
+
+    for key in ("img_url", "image", "url"):
+        value = data.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    raise ValueError("Could not find image URL in payload")
+
+
+def extract_invite_code(text: str) -> str:
+    """Extract the value following '当前邀请码' from OCR text."""
+    normalized = text.replace("\u3000", " ")
+    for pattern in _INVITE_CODE_PATTERNS:
+        match = pattern.search(normalized)
+        if match:
+            return match.group(1).strip()
+
+    cjk_candidates: list[str] = []
+    for token in _CJK_TOKEN_RE.findall(normalized):
+        stripped = token.strip()
+        if len(stripped) == 5 and stripped not in _CJK_STOP_WORDS:
+            cjk_candidates.append(stripped)
+    unique_cjk_candidates = list(dict.fromkeys(cjk_candidates))
+    if len(unique_cjk_candidates) == 1:
+        return unique_cjk_candidates[0]
+
+    candidates: list[str] = []
+    for token in _TOKEN_RE.findall(normalized):
+        has_letter = any(ch.isalpha() for ch in token)
+        has_digit = any(ch.isdigit() for ch in token)
+        if has_letter and has_digit:
+            candidates.append(token.strip())
+    unique_candidates = list(dict.fromkeys(candidates))
+    if len(unique_candidates) == 1:
+        return unique_candidates[0]
+    raise ValueError("Could not find invite code in OCR text")
