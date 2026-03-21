@@ -227,6 +227,10 @@ def _render_html() -> bytes:
     h1,h2 { margin:0 0 12px; }
     .muted { color:var(--muted); }
     .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .console-panel { padding:16px; border:1px solid #e7d8c6; border-radius:16px; background:linear-gradient(180deg,#fffaf2,#f8efe3); }
+    .console-panel + .console-panel { margin-top:12px; }
+    .console-actions { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
+    .console-label { margin:0 0 10px; font-size:13px; font-weight:700; letter-spacing:.04em; color:#7c5f45; text-transform:uppercase; }
     button { border:0; border-radius:999px; padding:10px 16px; background:var(--accent); color:white; cursor:pointer; font-weight:600; }
     button.alt { background:#6f7c85; }
     button.warn { background:#8f3b2e; }
@@ -237,6 +241,12 @@ def _render_html() -> bytes:
     #logs { min-height:240px; max-height:420px; }
     .code { font-size: 32px; font-weight: 700; letter-spacing: 2px; color: var(--ok); }
     .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:#eee1d0; color:#5a493c; font-size:12px; }
+    .status-pill { display:inline-flex; align-items:center; gap:8px; padding:6px 12px; border-radius:999px; font-size:13px; font-weight:700; }
+    .status-pill::before { content:''; width:9px; height:9px; border-radius:999px; display:inline-block; }
+    .status-running { background:#e7f6ea; color:#205d35; }
+    .status-running::before { background:#2f9e5a; box-shadow:0 0 0 4px rgba(47,158,90,.16); }
+    .status-stopped { background:#efe5d8; color:#8a5c2f; }
+    .status-stopped::before { background:#c5873f; box-shadow:0 0 0 4px rgba(197,135,63,.16); }
     .banner { display:none; margin-top:12px; padding:12px 14px; border-radius:14px; background:#e7f6ea; border:1px solid #b9dfc3; color:#205d35; font-weight:600; }
     .toast { position:fixed; right:20px; bottom:20px; display:none; padding:12px 14px; border-radius:14px; background:#1f4d35; color:#fff; box-shadow:0 10px 30px rgba(0,0,0,.15); }
     .log-line { display:block; padding:2px 0; }
@@ -258,20 +268,35 @@ def _render_html() -> bytes:
     <div class="grid">
       <div class="card">
         <h2>控制台</h2>
-        <div class="row" style="margin-bottom:12px">
-          <button data-label="开始监听" onclick="post('/api/start', null, this)">开始监听</button>
-          <button class="alt" data-label="停止监听" onclick="post('/api/stop', null, this)">停止监听</button>
-          <button class="warn" data-label="手动重试" onclick="post('/api/retry', null, this)">手动重试</button>
+        <div class="console-panel">
+          <div class="console-label">监听控制</div>
+          <div class="console-actions">
+            <button data-label="开始监听" onclick="post('/api/start', null, this)">开始监听</button>
+            <button class="alt" data-label="停止监听" onclick="post('/api/stop', null, this)">停止监听</button>
+            <button class="warn" data-label="手动重试" onclick="post('/api/retry', null, this)">手动重试</button>
+          </div>
+          <div class="muted" style="margin-top:10px">
+            开始监听后会按设定间隔持续轮询最新图片；停止监听后会结束后台轮询。
+          </div>
+          <div class="muted" style="margin-top:6px">
+            手动重试会立即对当前最新图片再执行一次 OCR 和提取流程，不需要等待下一轮轮询，也不受监听是否开启影响。
+          </div>
         </div>
-        <div class="row">
-          <input id="assetIdInput" placeholder="输入要清理的 seen_id">
-          <button class="alt" data-label="清空指定 seen_id" onclick="clearSeenId(this)">清空指定 seen_id</button>
+        <div class="console-panel">
+          <div class="console-label">seen_id 管理</div>
+          <div class="console-actions">
+            <input id="assetIdInput" placeholder="输入要清理的 seen_id">
+            <button class="alt" data-label="清空指定 seen_id" onclick="clearSeenId(this)">清空指定 seen_id</button>
+          </div>
+          <div class="muted" style="margin-top:10px">
+            清空指定 seen_id 后，当前 asset_id 会重新变成可处理状态。
+          </div>
         </div>
       </div>
       <div class="card">
         <h2>当前状态</h2>
-        <div>运行状态：<span id="running" class="pill">-</span></div>
-        <div style="margin-top:10px">下次刷新倒计时：<strong id="countdownValue">-</strong></div>
+        <div>运行状态：<span id="running" class="status-pill status-stopped">已停止</span></div>
+        <div style="margin-top:10px">下次刷新：<strong id="countdownValue">-</strong></div>
         <div style="margin-top:10px">最新 asset_id：<strong id="assetId">-</strong></div>
         <div style="margin-top:10px">最新邀请码：</div>
         <div id="latestCode" class="code">-</div>
@@ -294,8 +319,6 @@ def _render_html() -> bytes:
   </div>
   <div id="toast" class="toast">已复制邀请码</div>
   <script>
-    let countdownTimer = null;
-    let nextRefreshAt = null;
     function setButtonLoading(button, loading) {
       if (!button) return;
       if (!button.dataset.label) button.dataset.label = button.textContent.trim();
@@ -364,19 +387,12 @@ def _render_html() -> bytes:
         toast.style.display = 'none';
       }, 2200);
     }
-    function startCountdown(intervalSeconds) {
-      nextRefreshAt = Date.now() + Math.max(intervalSeconds, 0) * 1000;
-      clearInterval(countdownTimer);
-      const render = () => {
-        if (!nextRefreshAt) {
-          document.getElementById('countdownValue').textContent = '-';
-          return;
-        }
-        const remainingMs = Math.max(0, nextRefreshAt - Date.now());
-        document.getElementById('countdownValue').textContent = `${(remainingMs / 1000).toFixed(1)}s`;
-      };
-      render();
-      countdownTimer = setInterval(render, 100);
+    function renderNextRefresh(intervalSeconds) {
+      if (intervalSeconds == null) {
+        document.getElementById('countdownValue').textContent = '-';
+        return;
+      }
+      document.getElementById('countdownValue').textContent = `约 ${Number(intervalSeconds).toFixed(1)} 秒后`;
     }
     function renderLogs(items) {
       const logs = document.getElementById('logs');
@@ -400,7 +416,9 @@ def _render_html() -> bytes:
     async function refresh() {
       const res = await fetch('/api/state');
       const data = await res.json();
-      document.getElementById('running').textContent = data.running ? '监听中' : '已停止';
+      const running = document.getElementById('running');
+      running.textContent = data.running ? '监听中' : '已停止';
+      running.className = data.running ? 'status-pill status-running' : 'status-pill status-stopped';
       document.getElementById('lastSuccessAt').textContent = data.last_success_at || '-';
       document.getElementById('assetId').textContent = data.latest_asset_id || '-';
       document.getElementById('latestCode').textContent = data.latest_code || '-';
@@ -411,7 +429,7 @@ def _render_html() -> bytes:
       if (data.latest_code) {
         showBanner(`已发现可用邀请码：${data.latest_code}`);
       }
-      startCountdown(data.interval || 1.5);
+      renderNextRefresh(data.interval || 1.5);
     }
     refresh();
     setInterval(refresh, 1500);

@@ -461,6 +461,16 @@ class WebAPITests(unittest.TestCase):
         self.assertIn("setButtonLoading", body)
         self.assertIn("renderLogs", body)
         self.assertIn("showToast('已清空 seen_id", body)
+        self.assertLess(body.index("停止监听"), body.index("手动重试"))
+        self.assertIn("console-panel", body)
+        self.assertIn("console-actions", body)
+        self.assertIn("开始监听后会按设定间隔持续轮询最新图片", body)
+        self.assertIn("停止监听后会结束后台轮询", body)
+        self.assertIn("手动重试会立即对当前最新图片再执行一次 OCR 和提取流程", body)
+        self.assertIn("清空指定 seen_id 后，当前 asset_id 会重新变成可处理状态", body)
+        self.assertIn("status-pill", body)
+        self.assertIn("status-running", body)
+        self.assertIn("status-stopped", body)
 
     def _request_json(self, host: str, port: int, method: str, path: str, payload: dict | None = None) -> dict:
         conn = HTTPConnection(host, port, timeout=2)
