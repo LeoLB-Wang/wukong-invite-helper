@@ -2,6 +2,29 @@
 
 Monitor Wukong invite image updates, extract invite codes with OCR, and optionally autofill the Wukong app on macOS.
 
+## 平台支持
+
+| 功能 | macOS | Windows (Git Bash / MSYS2) | Linux |
+|---|---|---|---|
+| OCR 引擎 | Vision Framework | Tesseract | Tesseract |
+| 剪贴板复制 | `pbcopy` | `clip.exe` | `xclip` / `xsel` |
+| 提示音 | `afplay` | `winsound` | terminal bell |
+| 自动填入 Wukong.app | AppleScript | 不支持 | 不支持 |
+
+### macOS 前置要求
+
+- Xcode Command Line Tools（用于编译 Vision OCR helper）
+- Python 3.11+, [uv](https://docs.astral.sh/uv/)
+
+### Windows 前置要求
+
+- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) — 安装后确保 `tesseract` 在 `PATH` 中
+- 安装简体中文语言包 (`chi_sim`)，通常安装时勾选即可
+- 如果 tessdata 不在默认路径，设置环境变量 `TESSDATA_PREFIX` 指向 tessdata 目录
+- Python 3.11+, [uv](https://docs.astral.sh/uv/)
+- Git Bash 或 MSYS2（用于运行 shell 脚本）
+- 安装 Python 依赖：`uv pip install pytesseract`（或 `uv pip install -e ".[tesseract]"`）
+
 ## TL;DR
 
 当前工具的目标流程是：
@@ -177,10 +200,18 @@ AUTO_SUBMIT_APP=1
 
 ## Commands
 
-### Run Full Flow
+### Run Full Flow (macOS)
 
 ```bash
 TIMEOUT_SECONDS=330 INTERVAL=0.5 AUTO_FILL_APP=1 AUTO_SUBMIT_APP=0 ENABLE_SOUND=1 bash scripts/snatch_invite.sh
+```
+
+### Run Full Flow (Windows, Git Bash)
+
+`fill-app` 会自动跳过，其余流程一致：
+
+```bash
+TIMEOUT_SECONDS=330 INTERVAL=0.5 AUTO_FILL_APP=0 ENABLE_SOUND=1 bash scripts/snatch_invite.sh
 ```
 
 ### Test URL Parsing

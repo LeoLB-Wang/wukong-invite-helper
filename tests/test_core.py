@@ -1,10 +1,15 @@
 import unittest
+import os
+import stat
+import subprocess
+import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 from wukong_invite.core import extract_invite_code, parse_js_payload
 from wukong_invite.notify import copy_to_clipboard, play_alert
-from wukong_invite.ocr import VisionOCR
+from wukong_invite.ops import cmd_fill_app
+from wukong_invite.ocr import VisionOCR, TesseractOCR, create_ocr
 
 
 class ParseJsPayloadTests(unittest.TestCase):
@@ -58,16 +63,34 @@ class VisionOCRTests(unittest.TestCase):
         ocr = VisionOCR(Path("/tmp/project"))
         alpha_paths = [Path("/tmp/a1.png"), Path("/tmp/a2.png")]
         with (
-            patch.object(ocr, "_preprocess_alpha", return_value=alpha_paths),
-            patch.object(ocr, "_recognize_vision", side_effect=["", "当前邀请码：金蝉脱凡壳"]),
+            patch("wukong_invite.ocr._preprocess_alpha", return_value=alpha_paths),
+            patch.object(ocr, "_recognize", side_effect=["", "当前邀请码：金蝉脱凡壳"]),
         ):
             self.assertEqual(ocr.recognize_text(Path("/tmp/original.png")), "当前邀请码：金蝉脱凡壳")
 
 
+class CreateOCRFactoryTests(unittest.TestCase):
+    @patch("wukong_invite.ocr.platform.system", return_value="Darwin")
+    def test_darwin_returns_vision_ocr(self, _mock) -> None:
+        ocr = create_ocr(Path("/tmp/project"))
+        self.assertIsInstance(ocr, VisionOCR)
+
+    @patch("wukong_invite.ocr.platform.system", return_value="Windows")
+    def test_windows_returns_tesseract_ocr(self, _mock) -> None:
+        ocr = create_ocr(Path("/tmp/project"))
+        self.assertIsInstance(ocr, TesseractOCR)
+
+    @patch("wukong_invite.ocr.platform.system", return_value="Linux")
+    def test_linux_returns_tesseract_ocr(self, _mock) -> None:
+        ocr = create_ocr(Path("/tmp/project"))
+        self.assertIsInstance(ocr, TesseractOCR)
+
+
 class NotifyTests(unittest.TestCase):
+    @patch("wukong_invite.notify.platform.system", return_value="Darwin")
     @patch("wukong_invite.notify.subprocess.run")
     @patch("wukong_invite.notify.shutil.which", return_value="/usr/bin/pbcopy")
-    def test_copy_to_clipboard_uses_pbcopy(self, _which, run_mock) -> None:
+    def test_copy_to_clipboard_uses_pbcopy(self, _which, run_mock, _platform) -> None:
         copy_to_clipboard("WUKONG2026")
         run_mock.assert_called_once_with(
             ["/usr/bin/pbcopy"],
@@ -76,9 +99,10 @@ class NotifyTests(unittest.TestCase):
             check=True,
         )
 
+    @patch("wukong_invite.notify.platform.system", return_value="Darwin")
     @patch("wukong_invite.notify.subprocess.run")
     @patch("wukong_invite.notify.shutil.which", return_value="/usr/bin/afplay")
-    def test_play_alert_uses_mac_sound(self, _which, run_mock) -> None:
+    def test_play_alert_uses_mac_sound(self, _which, run_mock, _platform) -> None:
         play_alert()
         run_mock.assert_called_once_with(
             ["/usr/bin/afplay", "/System/Library/Sounds/Glass.aiff"],
@@ -86,6 +110,95 @@ class NotifyTests(unittest.TestCase):
             stdout=-3,
             stderr=-3,
         )
+
+
+class OpsTests(unittest.TestCase):
+    @patch("wukong_invite.ops.platform.system", return_value="Darwin")
+    @patch("wukong_invite.ops.subprocess.run")
+    def test_fill_app_runs_osascript_with_submit_enabled(self, run_mock, _platform_mock) -> None:
+        self.assertEqual(cmd_fill_app("春江花月夜", no_submit=False), 0)
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[0], "osascript")
+        self.assertIn('click button "立即体验"', command[2])
+        self.assertIn("春江花月夜", command[2])
+
+    @patch("wukong_invite.ops.platform.system", return_value="Darwin")
+    @patch("wukong_invite.ops.subprocess.run")
+    def test_fill_app_runs_osascript_without_submit_when_disabled(self, run_mock, _platform_mock) -> None:
+        self.assertEqual(cmd_fill_app("春江花月夜", no_submit=True), 0)
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[0], "osascript")
+        self.assertNotIn('click button "立即体验"', command[2])
+        self.assertIn("春江花月夜", command[2])
+
+
+class SnatchInviteScriptTests(unittest.TestCase):
+    def test_snatch_invite_logs_progress_during_polling(self) -> None:
+        project_root = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fake_bin = Path(temp_dir) / "bin"
+            fake_bin.mkdir()
+
+            self._write_executable(
+                fake_bin / "curl",
+                """#!/usr/bin/env bash
+exit 1
+""",
+            )
+            self._write_executable(
+                fake_bin / "sleep",
+                """#!/usr/bin/env bash
+exit 0
+""",
+            )
+            self._write_executable(
+                fake_bin / "date",
+                """#!/usr/bin/env bash
+state_file="${TMPDIR:-/tmp}/wukong_test_fake_date_state"
+count=0
+if [ -f "$state_file" ]; then
+  count="$(cat "$state_file")"
+fi
+count=$((count + 1))
+printf '%s' "$count" > "$state_file"
+if [ "$1" = "+%s" ]; then
+  if [ "$count" -eq 1 ]; then
+    printf '100\\n'
+  elif [ "$count" -eq 2 ]; then
+    printf '100\\n'
+  else
+    printf '101\\n'
+  fi
+  exit 0
+fi
+printf 'unsupported fake date args: %s\\n' "$*" >&2
+exit 1
+""",
+            )
+
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            env["INTERVAL"] = "0"
+            env["TIMEOUT_SECONDS"] = "1"
+            env["TMPDIR"] = temp_dir
+
+            result = subprocess.run(
+                ["bash", "scripts/snatch_invite.sh"],
+                cwd=project_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("starting watcher", result.stderr)
+        self.assertIn("poll attempt #1", result.stderr)
+        self.assertIn("timeout without invite code", result.stderr)
+
+    def _write_executable(self, path: Path, content: str) -> None:
+        path.write_text(content)
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,12 @@ name = "wukong-invite-helper"
 version = "0.1.0"
 description = "Monitor Wukong invite image updates, extract invite codes with OCR, and optionally autofill the Wukong app on macOS."
 requires-python = ">=3.11"
+dependencies = [
+    "Pillow",
+]
+
+[project.optional-dependencies]
+tesseract = ["pytesseract"]
 
 [project.urls]
 Homepage = "https://github.com/LeoLB-Wang/wukong-invite-helper"

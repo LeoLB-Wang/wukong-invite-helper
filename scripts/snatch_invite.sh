@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+log() {
+  printf '[wukong-invite-helper] %s\n' "$*" >&2
+}
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# --------------- OS detection ---------------
+OS_TYPE="$(uname -s)"
+case "$OS_TYPE" in
+  Darwin)               IS_MACOS=1 ;;
+  MINGW*|MSYS*|CYGWIN*) IS_MACOS=0 ;;
+  *)                    IS_MACOS=0 ;;
+esac
+
+# --------------- venv setup ---------------
 if [ ! -d .venv ]; then
   mkdir -p .uv-cache
   UV_CACHE_DIR="$ROOT_DIR/.uv-cache" uv venv .venv
 fi
 
-source .venv/bin/activate
+if [ -f .venv/Scripts/activate ]; then
+  # Windows (Git Bash / MSYS2)
+  source .venv/Scripts/activate
+else
+  source .venv/bin/activate
+fi
+
 PYTHON_BIN="$(command -v python)"
 if [[ "$PYTHON_BIN" != "$ROOT_DIR/.venv/"* ]]; then
   echo "python is not using project .venv: $PYTHON_BIN" >&2
@@ -18,6 +37,7 @@ fi
 
 export PYTHONPATH="$ROOT_DIR/src"
 
+# --------------- config ---------------
 JS_URL="${1:-https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js}"
 INTERVAL="${INTERVAL:-1}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
@@ -28,16 +48,33 @@ AUTO_FILL_APP="${AUTO_FILL_APP:-1}"
 AUTO_SUBMIT_APP="${AUTO_SUBMIT_APP:-0}"
 DEADLINE=$(( $(date +%s) + TIMEOUT_SECONDS ))
 LAST_IMAGE_URL=""
+ATTEMPT=0
 
+# --------------- temp dir helper ---------------
+make_tmp_dir() {
+  if [ "$IS_MACOS" = "1" ]; then
+    mktemp -d /tmp/wukong-invite.XXXXXX
+  else
+    mktemp -d "${TEMP:-/tmp}/wukong-invite.XXXXXX"
+  fi
+}
+
+log "starting watcher: interval=${INTERVAL}s timeout=${TIMEOUT_SECONDS}s url=${JS_URL} os=${OS_TYPE}"
+
+# --------------- main loop ---------------
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  ATTEMPT=$((ATTEMPT + 1))
+  log "poll attempt #${ATTEMPT}"
   if PAYLOAD="$(curl -fsSL -H 'Cache-Control: no-cache' "$JS_URL" 2>/dev/null)"; then
     if IMAGE_URL="$(printf '%s' "$PAYLOAD" | python -m wukong_invite.ops parse-js 2>/dev/null)"; then
       if [ -n "$IMAGE_URL" ] && [ "$IMAGE_URL" != "$LAST_IMAGE_URL" ]; then
         LAST_IMAGE_URL="$IMAGE_URL"
-        TMP_DIR="$(mktemp -d /tmp/wukong-invite.XXXXXX)"
+        log "detected new image url"
+        TMP_DIR="$(make_tmp_dir)"
         IMAGE_PATH="$TMP_DIR/invite.png"
         if curl -fsSL -H 'Cache-Control: no-cache' -o "$IMAGE_PATH" "$IMAGE_URL" 2>/dev/null; then
           if CODE="$(python -m wukong_invite.ops extract-code --image "$IMAGE_PATH" 2>/dev/null)"; then
+            log "ocr extracted invite code successfully"
             NOTIFY_ARGS=(--code "$CODE" --sound-name "$SOUND_NAME")
             if [ "$ENABLE_CLIPBOARD" != "1" ]; then
               NOTIFY_ARGS+=(--no-clipboard)
@@ -46,7 +83,7 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
               NOTIFY_ARGS+=(--no-sound)
             fi
             python -m wukong_invite.ops notify "${NOTIFY_ARGS[@]}" >/dev/null 2>&1 || true
-            if [ "$AUTO_FILL_APP" = "1" ]; then
+            if [ "$IS_MACOS" = "1" ] && [ "$AUTO_FILL_APP" = "1" ]; then
               FILL_ARGS=(--code "$CODE")
               if [ "$AUTO_SUBMIT_APP" != "1" ]; then
                 FILL_ARGS+=(--no-submit)
@@ -57,13 +94,24 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
             rm -rf "$TMP_DIR"
             exit 0
           fi
+          log "ocr did not return a usable invite code"
+        else
+          log "failed to download invite image"
         fi
         rm -rf "$TMP_DIR"
+      elif [ -n "$IMAGE_URL" ]; then
+        log "image url unchanged"
+      else
+        log "parsed image url was empty"
       fi
+    else
+      log "failed to parse image url from payload"
     fi
+  else
+    log "failed to fetch js payload"
   fi
   sleep "$INTERVAL"
 done
 
-echo "timeout without invite code" >&2
+log "timeout without invite code"
 exit 1

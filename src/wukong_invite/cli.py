@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Final
 
 from wukong_invite.core import extract_invite_code, parse_js_payload
-from wukong_invite.ocr import VisionOCR
+from wukong_invite.ocr import OCREngine, create_ocr
 
 
 DEFAULT_JS_URL: Final[str] = "https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js"
@@ -54,18 +54,18 @@ def download_file(url: str, target: Path) -> None:
     )
 
 
-def run_once(js_url: str, ocr: VisionOCR) -> str:
+def run_once(js_url: str, ocr: OCREngine, project_root: Path) -> str:
     payload = fetch_text(js_url)
     image_url = parse_js_payload(payload)
     with tempfile.TemporaryDirectory(prefix="wukong-invite-") as temp_dir:
         image_path = Path(temp_dir) / "invite.png"
         download_file(image_url, image_path)
-        text = ocr.recognize_text(image_path)
+        text = ocr.recognize_text(image_path, project_root)
     return extract_invite_code(text)
 
 
 def watch(js_url: str, interval: float, timeout_seconds: int, project_root: Path) -> int:
-    ocr = VisionOCR(project_root)
+    ocr = create_ocr(project_root)
     deadline = time.time() + timeout_seconds
     seen_image_url = None
     last_error = None
@@ -79,7 +79,7 @@ def watch(js_url: str, interval: float, timeout_seconds: int, project_root: Path
                 with tempfile.TemporaryDirectory(prefix="wukong-invite-") as temp_dir:
                     image_path = Path(temp_dir) / "invite.png"
                     download_file(image_url, image_path)
-                    text = ocr.recognize_text(image_path)
+                    text = ocr.recognize_text(image_path, project_root)
                 code = extract_invite_code(text)
                 print(code)
                 return 0
