@@ -79,7 +79,10 @@ if not exist "%TESSDATA_DIR%\chi_sim.traineddata" (
 set "TESSDATA_PREFIX=%TESSDATA_DIR%"
 
 REM --------------- sync environment ---------------
-uv sync --no-editable --extra tesseract
+set "UV_CACHE_DIR=%CD%\.uv-cache"
+set "UV_LINK_MODE=copy"
+if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%"
+uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --extra tesseract
 if errorlevel 1 (
     echo [error] Failed to prepare the runtime environment.
     pause

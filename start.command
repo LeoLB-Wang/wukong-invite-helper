@@ -34,7 +34,10 @@ fi
 printf '[setup] 正在准备运行环境（首次启动需下载依赖，请稍候）...\n'
 
 # --------------- sync environment ---------------
-uv sync --no-editable
+UV_CACHE_DIR="$PWD/.uv-cache"
+UV_LINK_MODE="${UV_LINK_MODE:-copy}"
+mkdir -p "$UV_CACHE_DIR"
+uv sync --link-mode copy --cache-dir "$UV_CACHE_DIR" --no-editable
 
 if [[ ! -x ".venv/bin/python" ]]; then
   printf '[error] .venv/bin/python was not created.\n'

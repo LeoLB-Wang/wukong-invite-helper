@@ -763,14 +763,18 @@ exit 1
     def test_start_bat_launches_module_instead_of_console_script(self) -> None:
         launcher = Path(__file__).resolve().parents[1] / "start.bat"
         text = launcher.read_bytes().decode("ascii")
-        self.assertIn("uv sync --no-editable --extra tesseract", text)
+        self.assertIn('set "UV_CACHE_DIR=%CD%\\.uv-cache"', text)
+        self.assertIn('set "UV_LINK_MODE=copy"', text)
+        self.assertIn("uv sync --link-mode copy --cache-dir \"%UV_CACHE_DIR%\" --no-editable --extra tesseract", text)
         self.assertIn('".venv\\Scripts\\python.exe" -m wukong_invite.webui', text)
         self.assertNotIn("uv run wukong-invite-webui", text)
         self.assertNotIn("uv run python -m wukong_invite.webui", text)
 
     def test_start_command_launches_module_instead_of_console_script(self) -> None:
         launcher = (Path(__file__).resolve().parents[1] / "start.command").read_text()
-        self.assertIn("uv sync --no-editable", launcher)
+        self.assertIn('UV_CACHE_DIR="$PWD/.uv-cache"', launcher)
+        self.assertIn('UV_LINK_MODE="${UV_LINK_MODE:-copy}"', launcher)
+        self.assertIn('uv sync --link-mode copy --cache-dir "$UV_CACHE_DIR" --no-editable', launcher)
         self.assertIn('.venv/bin/python -m wukong_invite.webui', launcher)
         self.assertNotIn("uv run wukong-invite-webui", launcher)
         self.assertNotIn("uv run python -m wukong_invite.webui", launcher)
