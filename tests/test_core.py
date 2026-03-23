@@ -780,6 +780,7 @@ exit 1
         text = launcher.read_bytes().decode("ascii")
         self.assertIn("winget install -e --id UB-Mannheim.TesseractOCR", text)
         self.assertIn("chi_sim.traineddata", text)
+        self.assertIn('set "TESSDATA_DIR=%LOCALAPPDATA%\\wukong-invite-helper\\tessdata"', text)
         self.assertIn('set "TESSDATA_PREFIX=%TESSDATA_DIR%"', text)
 
     def _write_executable(self, path: Path, content: str) -> None:

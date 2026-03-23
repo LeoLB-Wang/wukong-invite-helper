@@ -64,7 +64,7 @@ if not defined TESSERACT_EXE (
 
 for %%I in ("%TESSERACT_EXE%") do set "TESSERACT_DIR=%%~dpI"
 set "PATH=%TESSERACT_DIR%;%PATH%"
-set "TESSDATA_DIR=%TESSERACT_DIR%tessdata"
+set "TESSDATA_DIR=%LOCALAPPDATA%\wukong-invite-helper\tessdata"
 if defined TESSDATA_PREFIX if exist "%TESSDATA_PREFIX%\chi_sim.traineddata" set "TESSDATA_DIR=%TESSDATA_PREFIX%"
 if not exist "%TESSDATA_DIR%" mkdir "%TESSDATA_DIR%"
 if not exist "%TESSDATA_DIR%\chi_sim.traineddata" (

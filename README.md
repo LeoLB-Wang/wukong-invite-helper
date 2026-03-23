@@ -30,7 +30,7 @@
 
 ### Windows 额外依赖
 
-Windows 双击 `start.bat` 时会自动尝试安装 Tesseract OCR，并补齐中文语言数据 `chi_sim`。
+Windows 双击 `start.bat` 时会自动尝试安装 Tesseract OCR，并把中文语言数据 `chi_sim` 下载到当前用户可写目录。
 
 若系统缺少 `winget` / App Installer，脚本会提示后退出；此时再手动安装 Tesseract 即可。
 

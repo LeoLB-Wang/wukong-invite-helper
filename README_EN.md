@@ -31,7 +31,7 @@ To enable the "autofill Wukong App" feature, grant Accessibility permission to y
 
 ### Windows Extra Dependencies
 
-On Windows, double-clicking `start.bat` will try to install Tesseract OCR automatically and download the `chi_sim` language data if needed.
+On Windows, double-clicking `start.bat` will try to install Tesseract OCR automatically and place the `chi_sim` language data in a user-writable directory.
 
 If `winget` / App Installer is unavailable, the script will stop with a clear error so you can install Tesseract manually.
 
