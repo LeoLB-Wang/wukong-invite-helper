@@ -860,7 +860,7 @@ exit 1
         self.assertIn('set "UV_CACHE_DIR=%CD%\\.uv-cache"', text)
         self.assertIn('set "UV_LINK_MODE=copy"', text)
         self.assertIn(
-            'uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra tesseract',
+            'uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra rapidocr',
             text,
         )
         self.assertIn('set "PYTHONPATH=%CD%\\src"', text)
@@ -888,16 +888,6 @@ exit 1
         self.assertIn(".venv/bin/python -m wukong_invite.webui", launcher)
         self.assertNotIn("uv run wukong-invite-webui", launcher)
         self.assertNotIn("uv run python -m wukong_invite.webui", launcher)
-
-    def test_start_bat_bootstraps_windows_tesseract(self) -> None:
-        launcher = Path(__file__).resolve().parents[1] / "start.bat"
-        text = launcher.read_bytes().decode("ascii")
-        self.assertIn("winget install -e --id UB-Mannheim.TesseractOCR", text)
-        self.assertIn("chi_sim.traineddata", text)
-        self.assertIn(
-            'set "TESSDATA_DIR=%LOCALAPPDATA%\\wukong-invite-helper\\tessdata"', text
-        )
-        self.assertIn('set "TESSDATA_PREFIX=%TESSDATA_DIR%"', text)
 
     def _write_executable(self, path: Path, content: str) -> None:
         path.write_text(content)

@@ -196,6 +196,32 @@ class VisionOCR(OCREngine):
         return super().recognize_text(image_path, root)
 
 
+class RapidOCREngine(OCREngine):
+    """RapidOCR engine (cross-platform, based on ONNXRuntime).
+
+    Uses PaddleOCR models converted to ONNX format for efficient inference.
+    Excellent Chinese text recognition without external dependencies.
+    """
+
+    def __init__(self) -> None:
+        self._engine = None
+
+    @property
+    def engine(self):
+        """Lazy initialization of RapidOCR engine."""
+        if self._engine is None:
+            from rapidocr import RapidOCR
+
+            self._engine = RapidOCR()
+        return self._engine
+
+    def _recognize(self, image_path: Path) -> str:
+        result = self.engine(str(image_path))
+        if result.txts:
+            return "\n".join(result.txts)
+        return ""
+
+
 class TesseractOCR(OCREngine):
     """Tesseract-based OCR engine (cross-platform, requires pytesseract + Tesseract binary).
 
@@ -265,4 +291,10 @@ def create_ocr(project_root: Path) -> OCREngine:
     """Factory: return the best OCR engine for the current platform."""
     if platform.system() == "Darwin":
         return VisionOCR(project_root)
-    return TesseractOCR(project_root=project_root)
+    # Try RapidOCR first, fallback to Tesseract if not available
+    try:
+        import rapidocr
+
+        return RapidOCREngine()
+    except ImportError:
+        return TesseractOCR(project_root=project_root)
