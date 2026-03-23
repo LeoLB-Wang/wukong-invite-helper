@@ -11,7 +11,11 @@ from http.client import HTTPConnection
 from pathlib import Path
 from unittest.mock import patch
 
-from wukong_invite.core import extract_image_asset_id, extract_invite_code, parse_js_payload
+from wukong_invite.core import (
+    extract_image_asset_id,
+    extract_invite_code,
+    parse_js_payload,
+)
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ops import cmd_fill_app
 from wukong_invite.ocr import VisionOCR, TesseractOCR, create_ocr
@@ -71,7 +75,9 @@ class CliHttpTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "invite.png"
-            with patch("wukong_invite.cli.urlopen", return_value=response) as urlopen_mock:
+            with patch(
+                "wukong_invite.cli.urlopen", return_value=response
+            ) as urlopen_mock:
                 cli.download_file("https://example.com/invite.png", target)
 
             self.assertEqual(target.read_bytes(), b"fake-image")
@@ -106,11 +112,15 @@ class ExtractInviteCodeTests(unittest.TestCase):
         text = "活动开始\n春江花月夜\n立即使用"
         self.assertEqual(extract_invite_code(text), "春江花月夜")
 
-    def test_extract_labelled_five_chinese_chars_with_windows_style_spaces(self) -> None:
+    def test_extract_labelled_five_chinese_chars_with_windows_style_spaces(
+        self,
+    ) -> None:
         text = "当 前 邀 请 码 ： 春 江 花 月 夜"
         self.assertEqual(extract_invite_code(text), "春江花月夜")
 
-    def test_extract_standalone_five_chinese_chars_with_windows_style_spaces(self) -> None:
+    def test_extract_standalone_five_chinese_chars_with_windows_style_spaces(
+        self,
+    ) -> None:
         text = "活动开始\n春 江 花 月 夜\n立即使用"
         self.assertEqual(extract_invite_code(text), "春江花月夜")
 
@@ -127,7 +137,9 @@ class VisionOCRTests(unittest.TestCase):
             patch("wukong_invite.ocr._preprocess_alpha", return_value=alpha_paths),
             patch.object(ocr, "_recognize", side_effect=["", "当前邀请码：金蝉脱凡壳"]),
         ):
-            self.assertEqual(ocr.recognize_text(Path("/tmp/original.png")), "当前邀请码：金蝉脱凡壳")
+            self.assertEqual(
+                ocr.recognize_text(Path("/tmp/original.png")), "当前邀请码：金蝉脱凡壳"
+            )
 
 
 class CreateOCRFactoryTests(unittest.TestCase):
@@ -194,8 +206,11 @@ class AutofillTests(unittest.TestCase):
     @patch("wukong_invite.autofill.subprocess.run")
     @patch("wukong_invite.autofill.copy_to_clipboard")
     @patch("wukong_invite.autofill.platform.system", return_value="Darwin")
-    def test_fill_macos_sends_osascript_with_submit(self, _sys, clip_mock, run_mock) -> None:
+    def test_fill_macos_sends_osascript_with_submit(
+        self, _sys, clip_mock, run_mock
+    ) -> None:
         from wukong_invite.autofill import fill_and_submit
+
         fill_and_submit("WUKONG2026", submit=True)
         clip_mock.assert_called_once_with("WUKONG2026")
         run_mock.assert_called_once()
@@ -206,8 +221,11 @@ class AutofillTests(unittest.TestCase):
     @patch("wukong_invite.autofill.subprocess.run")
     @patch("wukong_invite.autofill.copy_to_clipboard")
     @patch("wukong_invite.autofill.platform.system", return_value="Darwin")
-    def test_fill_macos_sends_osascript_without_submit(self, _sys, clip_mock, run_mock) -> None:
+    def test_fill_macos_sends_osascript_without_submit(
+        self, _sys, clip_mock, run_mock
+    ) -> None:
         from wukong_invite.autofill import fill_and_submit
+
         fill_and_submit("WUKONG2026", submit=False)
         clip_mock.assert_called_once_with("WUKONG2026")
         run_mock.assert_called_once()
@@ -219,10 +237,13 @@ class AutofillTests(unittest.TestCase):
     @patch("wukong_invite.autofill.activate_wukong_window")
     @patch("wukong_invite.autofill.copy_to_clipboard")
     @patch("wukong_invite.autofill.platform.system", return_value="Windows")
-    def test_fill_pyautogui_hotkey_sequence_windows(self, _sys, clip_mock, activate_mock, sleep_mock) -> None:
+    def test_fill_pyautogui_hotkey_sequence_windows(
+        self, _sys, clip_mock, activate_mock, sleep_mock
+    ) -> None:
         pyautogui = unittest.mock.Mock()
         with patch.dict("sys.modules", {"pyautogui": pyautogui}):
             from wukong_invite.autofill import fill_and_submit
+
             fill_and_submit("WUKONG2026", submit=True)
         clip_mock.assert_called_once_with("WUKONG2026")
         activate_mock.assert_called_once()
@@ -252,7 +273,10 @@ class WatchTests(unittest.TestCase):
                 patch("wukong_invite.cli.copy_to_clipboard") as copy_mock,
                 patch("wukong_invite.cli.play_alert") as alert_mock,
                 patch("wukong_invite.cli.cmd_fill_app", return_value=0) as fill_mock,
-                patch("wukong_invite.cli.time.time", side_effect=[100.0, 100.1, 100.2, 101.1]),
+                patch(
+                    "wukong_invite.cli.time.time",
+                    side_effect=[100.0, 100.1, 100.2, 101.1],
+                ),
                 patch("sys.stderr", new_callable=io.StringIO) as stderr,
                 patch("sys.stdout", new_callable=io.StringIO) as stdout,
             ):
@@ -294,7 +318,10 @@ class WatchTests(unittest.TestCase):
                 ),
                 patch("wukong_invite.cli.download_file"),
                 patch("wukong_invite.cli.time.sleep"),
-                patch("wukong_invite.cli.time.time", side_effect=[100.0, 100.1, 100.2, 101.1]),
+                patch(
+                    "wukong_invite.cli.time.time",
+                    side_effect=[100.0, 100.1, 100.2, 101.1],
+                ),
                 patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 exit_code = cli.watch(
@@ -332,7 +359,9 @@ class WatchTests(unittest.TestCase):
                 patch("wukong_invite.cli.download_file"),
                 patch("wukong_invite.cli.copy_to_clipboard", create=True) as copy_mock,
                 patch("wukong_invite.cli.play_alert", create=True) as alert_mock,
-                patch("wukong_invite.cli.cmd_fill_app", return_value=0, create=True) as fill_mock,
+                patch(
+                    "wukong_invite.cli.cmd_fill_app", return_value=0, create=True
+                ) as fill_mock,
                 patch("wukong_invite.cli.time.time", side_effect=[100.0, 100.1]),
                 patch("sys.stdout", new_callable=io.StringIO) as stdout,
             ):
@@ -369,7 +398,9 @@ class WebWatchServiceTests(unittest.TestCase):
             service = InviteWatchService(
                 project_root=project_root,
                 seen_ids_file=seen_ids_file,
-                fetch_text_func=lambda _url: 'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})',
+                fetch_text_func=lambda _url: (
+                    'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})'
+                ),
                 download_file_func=lambda _url, _path: None,
                 create_ocr_func=lambda _root: ocr,
                 notify_func=lambda _code: None,
@@ -395,7 +426,9 @@ class WebWatchServiceTests(unittest.TestCase):
                 project_root=project_root,
                 seen_ids_file=seen_ids_file,
                 interval=0.01,
-                fetch_text_func=lambda _url: 'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Seen_!!6000000001111-2-tps-1773-540.png"})',
+                fetch_text_func=lambda _url: (
+                    'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Seen_!!6000000001111-2-tps-1773-540.png"})'
+                ),
                 download_file_func=lambda _url, _path: None,
                 create_ocr_func=lambda _root: unittest.mock.Mock(),
                 notify_func=lambda _code: None,
@@ -424,7 +457,9 @@ class WebAPITests(unittest.TestCase):
                 project_root=project_root,
                 seen_ids_file=seen_ids_file,
                 interval=0.01,
-                fetch_text_func=lambda _url: 'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})',
+                fetch_text_func=lambda _url: (
+                    'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})'
+                ),
                 download_file_func=lambda _url, _path: None,
                 create_ocr_func=lambda _root: ocr,
                 notify_func=lambda _code: None,
@@ -515,7 +550,9 @@ class WebAPITests(unittest.TestCase):
         self.assertIn("status-running", body)
         self.assertIn("status-stopped", body)
 
-    def _request_json(self, host: str, port: int, method: str, path: str, payload: dict | None = None) -> dict:
+    def _request_json(
+        self, host: str, port: int, method: str, path: str, payload: dict | None = None
+    ) -> dict:
         conn = HTTPConnection(host, port, timeout=2)
         body = json.dumps(payload).encode("utf-8") if payload is not None else None
         headers = {"Content-Type": "application/json"} if payload is not None else {}
@@ -656,7 +693,10 @@ exit 1
             env["TMPDIR"] = temp_dir
             env["SEEN_IDS_FILE"] = str(seen_ids_file)
 
-            with patch("wukong_invite.ops.cmd_extract_code", side_effect=ValueError("ocr failed")):
+            with patch(
+                "wukong_invite.ops.cmd_extract_code",
+                side_effect=ValueError("ocr failed"),
+            ):
                 result = subprocess.run(
                     ["bash", "scripts/snatch_invite.sh"],
                     cwd=project_root,
@@ -665,7 +705,9 @@ exit 1
                     capture_output=True,
                     check=False,
                 )
-            seen_ids_content = seen_ids_file.read_text() if seen_ids_file.exists() else ""
+            seen_ids_content = (
+                seen_ids_file.read_text() if seen_ids_file.exists() else ""
+            )
 
         self.assertEqual(result.returncode, 1)
         self.assertNotIn("6000000001111", seen_ids_content)
@@ -676,17 +718,21 @@ exit 1
             project_root = Path(temp_dir) / "project"
             scripts_dir = project_root / "scripts"
             scripts_dir.mkdir(parents=True, exist_ok=True)
-            source_script = Path(__file__).resolve().parents[1] / "scripts" / "snatch_invite.sh"
+            source_script = (
+                Path(__file__).resolve().parents[1] / "scripts" / "snatch_invite.sh"
+            )
             script_content = source_script.read_text().replace(
                 'PYTHON_BIN="$(command -v python)"\n'
                 'if [[ "$PYTHON_BIN" != "$ROOT_DIR/.venv/"* ]]; then\n'
                 '  echo "python is not using project .venv: $PYTHON_BIN" >&2\n'
-                '  exit 1\n'
-                'fi\n',
+                "  exit 1\n"
+                "fi\n",
                 'PYTHON_BIN="$(command -v python)"\n',
             )
             (scripts_dir / "snatch_invite.sh").write_text(script_content)
-            (scripts_dir / "snatch_invite.sh").chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+            (scripts_dir / "snatch_invite.sh").chmod(
+                stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+            )
 
             venv_bin = project_root / ".venv" / "bin"
             venv_bin.mkdir(parents=True, exist_ok=True)
@@ -778,7 +824,9 @@ exit 1
                 capture_output=True,
                 check=False,
             )
-            seen_ids_content = seen_ids_file.read_text() if seen_ids_file.exists() else ""
+            seen_ids_content = (
+                seen_ids_file.read_text() if seen_ids_file.exists() else ""
+            )
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("春江花月夜", result.stdout)
@@ -790,7 +838,9 @@ exit 1
         try:
             launcher.read_bytes().decode("ascii")
         except UnicodeDecodeError as exc:
-            self.fail(f"start.bat must stay ASCII-only for cmd.exe compatibility: {exc}")
+            self.fail(
+                f"start.bat must stay ASCII-only for cmd.exe compatibility: {exc}"
+            )
 
     def test_start_bat_uses_crlf_line_endings(self) -> None:
         launcher = Path(__file__).resolve().parents[1] / "start.bat"
@@ -809,21 +859,33 @@ exit 1
         text = launcher.read_bytes().decode("ascii")
         self.assertIn('set "UV_CACHE_DIR=%CD%\\.uv-cache"', text)
         self.assertIn('set "UV_LINK_MODE=copy"', text)
-        self.assertIn("uv sync --link-mode copy --cache-dir \"%UV_CACHE_DIR%\" --no-editable --no-install-project --extra tesseract", text)
+        self.assertIn(
+            'uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra tesseract',
+            text,
+        )
         self.assertIn('set "PYTHONPATH=%CD%\\src"', text)
-        self.assertIn("echo [warn] First dependency sync failed. Retrying once...", text)
+        self.assertIn(
+            "echo [warn] First dependency sync failed. Retrying once...", text
+        )
         self.assertIn('".venv\\Scripts\\python.exe" -m wukong_invite.webui', text)
         self.assertNotIn("uv run wukong-invite-webui", text)
         self.assertNotIn("uv run python -m wukong_invite.webui", text)
 
     def test_start_command_launches_module_instead_of_console_script(self) -> None:
-        launcher = (Path(__file__).resolve().parents[1] / "start.command").read_text()
+        launcher = (Path(__file__).resolve().parents[1] / "start.command").read_text(
+            encoding="utf-8"
+        )
         self.assertIn('UV_CACHE_DIR="$PWD/.uv-cache"', launcher)
         self.assertIn('UV_LINK_MODE="${UV_LINK_MODE:-copy}"', launcher)
-        self.assertIn('uv sync --link-mode copy --cache-dir "$UV_CACHE_DIR" --no-editable --no-install-project', launcher)
-        self.assertIn('export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"', launcher)
+        self.assertIn(
+            'uv sync --link-mode copy --cache-dir "$UV_CACHE_DIR" --no-editable --no-install-project',
+            launcher,
+        )
+        self.assertIn(
+            'export PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}"', launcher
+        )
         self.assertIn("First dependency sync failed. Retrying once", launcher)
-        self.assertIn('.venv/bin/python -m wukong_invite.webui', launcher)
+        self.assertIn(".venv/bin/python -m wukong_invite.webui", launcher)
         self.assertNotIn("uv run wukong-invite-webui", launcher)
         self.assertNotIn("uv run python -m wukong_invite.webui", launcher)
 
@@ -832,7 +894,9 @@ exit 1
         text = launcher.read_bytes().decode("ascii")
         self.assertIn("winget install -e --id UB-Mannheim.TesseractOCR", text)
         self.assertIn("chi_sim.traineddata", text)
-        self.assertIn('set "TESSDATA_DIR=%LOCALAPPDATA%\\wukong-invite-helper\\tessdata"', text)
+        self.assertIn(
+            'set "TESSDATA_DIR=%LOCALAPPDATA%\\wukong-invite-helper\\tessdata"', text
+        )
         self.assertIn('set "TESSDATA_PREFIX=%TESSDATA_DIR%"', text)
 
     def _write_executable(self, path: Path, content: str) -> None:

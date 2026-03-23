@@ -118,12 +118,14 @@ class OCREngine(abc.ABC):
                 return 0
             n = _count_cjk5_tokens(text)
             if n == 1:
-                return 3          # perfect — exactly one invite-code candidate
+                return 3  # perfect — exactly one invite-code candidate
             if _has_cjk(text):
-                return 2          # has CJK but ambiguous
-            return 1              # non-empty, no CJK (likely garbage)
+                return 2  # has CJK but ambiguous
+            return 1  # non-empty, no CJK (likely garbage)
 
-        with tempfile.TemporaryDirectory(prefix="wukong-preprocess-", dir=runtime_dir) as temp_dir:
+        with tempfile.TemporaryDirectory(
+            prefix="wukong-preprocess-", dir=runtime_dir
+        ) as temp_dir:
             for candidate_path in _preprocess_alpha(image_path, Path(temp_dir)):
                 text = self._recognize(candidate_path)
                 s = _score(text)
@@ -131,7 +133,7 @@ class OCREngine(abc.ABC):
                     best_score = s
                     best_text = text
                 if best_score == 3:
-                    return best_text       # can't do better
+                    return best_text  # can't do better
 
         # Fallback: OCR on original image
         text = self._recognize(image_path)
@@ -150,7 +152,9 @@ class VisionOCR(OCREngine):
         self.module_cache_path = project_root / ".cache" / "clang-module-cache"
         self.source_path = project_root / "tools" / "vision_ocr.m"
 
-    def _compile(self, source_path: Path, binary_path: Path, frameworks: list[str]) -> Path:
+    def _compile(
+        self, source_path: Path, binary_path: Path, frameworks: list[str]
+    ) -> Path:
         clang = shutil.which("clang")
         if not clang:
             raise RuntimeError("clang not found; cannot build native helper")
@@ -168,9 +172,14 @@ class VisionOCR(OCREngine):
         return binary_path
 
     def ensure_binary(self) -> Path:
-        if self.binary_path.exists() and self.binary_path.stat().st_mtime >= self.source_path.stat().st_mtime:
+        if (
+            self.binary_path.exists()
+            and self.binary_path.stat().st_mtime >= self.source_path.stat().st_mtime
+        ):
             return self.binary_path
-        return self._compile(self.source_path, self.binary_path, ["Foundation", "Vision", "AppKit"])
+        return self._compile(
+            self.source_path, self.binary_path, ["Foundation", "Vision", "AppKit"]
+        )
 
     def _recognize(self, image_path: Path) -> str:
         binary = self.ensure_binary()
@@ -194,9 +203,56 @@ class TesseractOCR(OCREngine):
     because the invite code is known to be exactly 5 CJK characters.
     """
 
-    def __init__(self, lang: str = "chi_sim", psm: int = 7) -> None:
+    def __init__(
+        self, lang: str = "chi_sim", psm: int = 7, project_root: Path | None = None
+    ) -> None:
         self.lang = lang
-        self.config = f"--psm {psm}"
+        self.config = f"--psm {psm} --oem 3"
+        self._setup_tesseract_cmd()
+        self._setup_tessdata_prefix(project_root)
+
+    def _setup_tesseract_cmd(self) -> None:
+        """Auto-detect tesseract executable path on Windows."""
+        import pytesseract
+
+        # Check if tesseract is already in PATH
+        if shutil.which("tesseract"):
+            return
+
+        # Windows standard installation paths
+        if platform.system() == "Windows":
+            candidates = [
+                Path(os.environ.get("ProgramFiles", "C:\\Program Files"))
+                / "Tesseract-OCR"
+                / "tesseract.exe",
+                Path(os.environ.get("LocalAppData", ""))
+                / "Programs"
+                / "Tesseract-OCR"
+                / "tesseract.exe",
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    pytesseract.pytesseract.tesseract_cmd = str(candidate)
+                    return
+
+    def _setup_tessdata_prefix(self, project_root: Path | None) -> None:
+        """Setup TESSDATA_PREFIX for Windows."""
+        if platform.system() != "Windows":
+            return
+
+        # If environment variable is already set and directory exists, skip
+        tessdata_prefix = os.environ.get("TESSDATA_PREFIX")
+        if tessdata_prefix and Path(tessdata_prefix).exists():
+            return
+
+        # Use user local directory
+        local_tessdata = (
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "wukong-invite-helper"
+            / "tessdata"
+        )
+        if local_tessdata.exists():
+            os.environ["TESSDATA_PREFIX"] = str(local_tessdata)
 
     def _recognize(self, image_path: Path) -> str:
         import pytesseract
@@ -209,4 +265,4 @@ def create_ocr(project_root: Path) -> OCREngine:
     """Factory: return the best OCR engine for the current platform."""
     if platform.system() == "Darwin":
         return VisionOCR(project_root)
-    return TesseractOCR()
+    return TesseractOCR(project_root=project_root)

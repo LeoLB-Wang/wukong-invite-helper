@@ -69,7 +69,7 @@ if defined TESSDATA_PREFIX if exist "%TESSDATA_PREFIX%\chi_sim.traineddata" set 
 if not exist "%TESSDATA_DIR%" mkdir "%TESSDATA_DIR%"
 if not exist "%TESSDATA_DIR%\chi_sim.traineddata" (
     echo [setup] Chinese OCR data was not found. Downloading it now...
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata' -OutFile '%TESSDATA_DIR%\chi_sim.traineddata'"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/tesseract-ocr/tessdata/raw/main/chi_sim.traineddata' -OutFile '%TESSDATA_DIR%\chi_sim.traineddata'"
     if errorlevel 1 (
         echo [error] Failed to download chi_sim.traineddata.
         pause
@@ -106,6 +106,7 @@ echo.
 
 REM --------------- launch ---------------
 REM The environment is ready, so launch the module from the project virtualenv.
+set "TESSDATA_PREFIX=%TESSDATA_DIR%"
 ".venv\Scripts\python.exe" -m wukong_invite.webui --host %HOST% --port %PORT%
 
 pause
