@@ -15,6 +15,7 @@ _INVITE_CODE_PATTERNS = [
 ]
 _TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{6,}\b")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{4,8}")
+_FRAGMENTED_CJK_SPACES_RE = re.compile(r"(?<=[\u4e00-\u9fff])[ \t]+(?=[\u4e00-\u9fff])")
 _CJK_STOP_WORDS = {
     "限量",
     "已领完",
@@ -58,6 +59,7 @@ def extract_image_asset_id(image_url: str) -> str:
 def extract_invite_code(text: str) -> str:
     """Extract the value following '当前邀请码' from OCR text."""
     normalized = text.replace("\u3000", " ")
+    normalized = _FRAGMENTED_CJK_SPACES_RE.sub("", normalized)
 
     # --- Priority 1: labelled pattern (most reliable) ---
     for pattern in _INVITE_CODE_PATTERNS:

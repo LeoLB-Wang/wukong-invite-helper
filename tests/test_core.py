@@ -70,6 +70,14 @@ class ExtractInviteCodeTests(unittest.TestCase):
         text = "活动开始\n春江花月夜\n立即使用"
         self.assertEqual(extract_invite_code(text), "春江花月夜")
 
+    def test_extract_labelled_five_chinese_chars_with_windows_style_spaces(self) -> None:
+        text = "当 前 邀 请 码 ： 春 江 花 月 夜"
+        self.assertEqual(extract_invite_code(text), "春江花月夜")
+
+    def test_extract_standalone_five_chinese_chars_with_windows_style_spaces(self) -> None:
+        text = "活动开始\n春 江 花 月 夜\n立即使用"
+        self.assertEqual(extract_invite_code(text), "春江花月夜")
+
     def test_rejects_known_chinese_ui_text(self) -> None:
         with self.assertRaises(ValueError):
             extract_invite_code("欢迎回来\n立即体验\n已领完")
