@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import Final
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from wukong_invite.core import extract_image_asset_id, extract_invite_code, parse_js_payload
 from wukong_invite.notify import copy_to_clipboard, play_alert
@@ -22,38 +23,22 @@ USER_AGENT: Final[str] = (
 
 
 def fetch_text(url: str) -> str:
-    result = subprocess.run(
-        [
-            "curl",
-            "-fsSL",
-            "-A",
-            USER_AGENT,
-            "-H",
-            "Cache-Control: no-cache",
-            url,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout
+    request = Request(url, headers={"User-Agent": USER_AGENT, "Cache-Control": "no-cache"})
+    try:
+        with urlopen(request, timeout=20) as response:
+            encoding = response.headers.get_content_charset() or "utf-8"
+            return response.read().decode(encoding)
+    except (HTTPError, URLError, OSError) as exc:
+        raise RuntimeError(f"request failed for {url}: {exc}") from exc
 
 
 def download_file(url: str, target: Path) -> None:
-    subprocess.run(
-        [
-            "curl",
-            "-fsSL",
-            "-A",
-            USER_AGENT,
-            "-H",
-            "Cache-Control: no-cache",
-            "-o",
-            str(target),
-            url,
-        ],
-        check=True,
-    )
+    request = Request(url, headers={"User-Agent": USER_AGENT, "Cache-Control": "no-cache"})
+    try:
+        with urlopen(request, timeout=20) as response:
+            target.write_bytes(response.read())
+    except (HTTPError, URLError, OSError) as exc:
+        raise RuntimeError(f"request failed for {url}: {exc}") from exc
 
 
 def run_once(js_url: str, ocr: OCREngine, project_root: Path) -> str:
@@ -129,7 +114,7 @@ def watch(js_url: str, interval: float, timeout_seconds: int, project_root: Path
                 _best_effort_notify(code)
                 print(code)
                 return 0
-        except (ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
+        except (ValueError, RuntimeError) as exc:
             last_error = exc
 
         time.sleep(interval)

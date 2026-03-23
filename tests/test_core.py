@@ -45,6 +45,42 @@ class ParseJsPayloadTests(unittest.TestCase):
             extract_image_asset_id("https://example.com/invite.png")
 
 
+class CliHttpTests(unittest.TestCase):
+    def test_fetch_text_uses_python_http_client(self) -> None:
+        response = unittest.mock.MagicMock()
+        response.read.return_value = "img_url({})".encode("utf-8")
+        response.headers.get_content_charset.return_value = "utf-8"
+        response.__enter__.return_value = response
+        response.__exit__.return_value = None
+
+        with patch("wukong_invite.cli.urlopen", return_value=response) as urlopen_mock:
+            text = cli.fetch_text("https://example.com/invite.js")
+
+        self.assertEqual(text, "img_url({})")
+        request = urlopen_mock.call_args.args[0]
+        self.assertEqual(request.full_url, "https://example.com/invite.js")
+        self.assertEqual(request.headers["User-agent"], cli.USER_AGENT)
+        self.assertEqual(request.headers["Cache-control"], "no-cache")
+
+    def test_download_file_uses_python_http_client(self) -> None:
+        response = unittest.mock.MagicMock()
+        response.read.return_value = b"fake-image"
+        response.headers.get_content_charset.return_value = None
+        response.__enter__.return_value = response
+        response.__exit__.return_value = None
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "invite.png"
+            with patch("wukong_invite.cli.urlopen", return_value=response) as urlopen_mock:
+                cli.download_file("https://example.com/invite.png", target)
+
+            self.assertEqual(target.read_bytes(), b"fake-image")
+            request = urlopen_mock.call_args.args[0]
+            self.assertEqual(request.full_url, "https://example.com/invite.png")
+            self.assertEqual(request.headers["User-agent"], cli.USER_AGENT)
+            self.assertEqual(request.headers["Cache-control"], "no-cache")
+
+
 class ExtractInviteCodeTests(unittest.TestCase):
     def test_extract_after_current_invite_label(self) -> None:
         text = "活动开始\n当前邀请码：WUKONG2026\n请尽快使用"
