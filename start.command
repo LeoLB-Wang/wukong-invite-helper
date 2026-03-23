@@ -33,6 +33,16 @@ fi
 
 printf '[setup] 正在准备运行环境（首次启动需下载依赖，请稍候）...\n'
 
+# --------------- sync environment ---------------
+uv sync --no-editable
+
+if [[ ! -x ".venv/bin/python" ]]; then
+  printf '[error] .venv/bin/python was not created.\n'
+  printf '按回车键退出...\n'
+  read -r
+  exit 1
+fi
+
 # --------------- auto-open browser ---------------
 (sleep 2 && open "http://${HOST}:${PORT}") &
 
@@ -40,5 +50,5 @@ printf '[start] Web UI 启动中 → http://%s:%s\n' "$HOST" "$PORT"
 printf '[start] 浏览器将自动打开，关闭此窗口即可停止服务\n\n'
 
 # --------------- launch ---------------
-# uv run 自动完成: 安装 Python → 创建 .venv → 安装依赖 → 运行
-uv run wukong-invite-webui --host "$HOST" --port "$PORT"
+# 环境已准备完成，直接使用项目虚拟环境启动
+.venv/bin/python -m wukong_invite.webui --host "$HOST" --port "$PORT"

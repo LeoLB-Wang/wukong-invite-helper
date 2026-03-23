@@ -176,16 +176,15 @@ class AutofillTests(unittest.TestCase):
     @patch("wukong_invite.autofill.copy_to_clipboard")
     @patch("wukong_invite.autofill.platform.system", return_value="Windows")
     def test_fill_pyautogui_hotkey_sequence_windows(self, _sys, clip_mock, activate_mock, sleep_mock) -> None:
-        import pyautogui
-        with patch.object(pyautogui, "hotkey") as hotkey_mock, \
-             patch.object(pyautogui, "press") as press_mock:
+        pyautogui = unittest.mock.Mock()
+        with patch.dict("sys.modules", {"pyautogui": pyautogui}):
             from wukong_invite.autofill import fill_and_submit
             fill_and_submit("WUKONG2026", submit=True)
         clip_mock.assert_called_once_with("WUKONG2026")
         activate_mock.assert_called_once()
-        hotkey_mock.assert_any_call("ctrl", "a")
-        hotkey_mock.assert_any_call("ctrl", "v")
-        press_mock.assert_called_once_with("enter")
+        pyautogui.hotkey.assert_any_call("ctrl", "a")
+        pyautogui.hotkey.assert_any_call("ctrl", "v")
+        pyautogui.press.assert_called_once_with("enter")
 
 
 class WatchTests(unittest.TestCase):
@@ -760,6 +759,28 @@ exit 1
         text = launcher.read_bytes().decode("ascii")
         self.assertNotIn("::", text)
         self.assertNotIn("enabledelayedexpansion", text.lower())
+
+    def test_start_bat_launches_module_instead_of_console_script(self) -> None:
+        launcher = Path(__file__).resolve().parents[1] / "start.bat"
+        text = launcher.read_bytes().decode("ascii")
+        self.assertIn("uv sync --no-editable --extra tesseract", text)
+        self.assertIn('".venv\\Scripts\\python.exe" -m wukong_invite.webui', text)
+        self.assertNotIn("uv run wukong-invite-webui", text)
+        self.assertNotIn("uv run python -m wukong_invite.webui", text)
+
+    def test_start_command_launches_module_instead_of_console_script(self) -> None:
+        launcher = (Path(__file__).resolve().parents[1] / "start.command").read_text()
+        self.assertIn("uv sync --no-editable", launcher)
+        self.assertIn('.venv/bin/python -m wukong_invite.webui', launcher)
+        self.assertNotIn("uv run wukong-invite-webui", launcher)
+        self.assertNotIn("uv run python -m wukong_invite.webui", launcher)
+
+    def test_start_bat_bootstraps_windows_tesseract(self) -> None:
+        launcher = Path(__file__).resolve().parents[1] / "start.bat"
+        text = launcher.read_bytes().decode("ascii")
+        self.assertIn("winget install -e --id UB-Mannheim.TesseractOCR", text)
+        self.assertIn("chi_sim.traineddata", text)
+        self.assertIn('set "TESSDATA_PREFIX=%TESSDATA_DIR%"', text)
 
     def _write_executable(self, path: Path, content: str) -> None:
         path.write_text(content)

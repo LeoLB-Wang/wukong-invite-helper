@@ -30,9 +30,9 @@
 
 ### Windows 额外依赖
 
-Windows 需预装 [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) 及中文语言数据 `chi_sim`。
+Windows 双击 `start.bat` 时会自动尝试安装 Tesseract OCR，并补齐中文语言数据 `chi_sim`。
 
-如果 `tessdata` 不在默认目录，需要配置 `TESSDATA_PREFIX`。
+若系统缺少 `winget` / App Installer，脚本会提示后退出；此时再手动安装 Tesseract 即可。
 
 ## 命令行启动
 
@@ -106,9 +106,9 @@ uv run wukong-invite-webui --host 127.0.0.1 --port 8787
 
 ### Windows 额外依赖
 
-Windows 需预装 [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) 及中文语言数据 `chi_sim`。
+Windows 双击 `start.bat` 时会自动尝试安装 Tesseract OCR，并补齐中文语言数据 `chi_sim`。
 
-如果 `tessdata` 不在默认目录，需要配置 `TESSDATA_PREFIX`。
+若系统缺少 `winget` / App Installer，脚本会提示后退出；此时再手动安装 Tesseract 即可。
 
 ## 命令行启动
 
