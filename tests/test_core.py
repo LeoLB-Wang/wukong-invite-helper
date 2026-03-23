@@ -742,6 +742,25 @@ exit 1
         self.assertIn("6000000009999", seen_ids_content)
         self.assertIn("saved seen asset id [6000000009999]", result.stderr)
 
+    def test_start_bat_is_ascii_only_for_cmd_compatibility(self) -> None:
+        launcher = Path(__file__).resolve().parents[1] / "start.bat"
+        try:
+            launcher.read_bytes().decode("ascii")
+        except UnicodeDecodeError as exc:
+            self.fail(f"start.bat must stay ASCII-only for cmd.exe compatibility: {exc}")
+
+    def test_start_bat_uses_crlf_line_endings(self) -> None:
+        launcher = Path(__file__).resolve().parents[1] / "start.bat"
+        raw = launcher.read_bytes()
+        self.assertIn(b"\r\n", raw)
+        self.assertNotIn(b"\n", raw.replace(b"\r\n", b""))
+
+    def test_start_bat_avoids_fragile_batch_constructs(self) -> None:
+        launcher = Path(__file__).resolve().parents[1] / "start.bat"
+        text = launcher.read_bytes().decode("ascii")
+        self.assertNotIn("::", text)
+        self.assertNotIn("enabledelayedexpansion", text.lower())
+
     def _write_executable(self, path: Path, content: str) -> None:
         path.write_text(content)
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
