@@ -82,7 +82,7 @@ REM --------------- sync environment ---------------
 set "UV_CACHE_DIR=%CD%\.uv-cache"
 set "UV_LINK_MODE=copy"
 if not exist "%UV_CACHE_DIR%" mkdir "%UV_CACHE_DIR%"
-uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --extra tesseract
+call :sync_env
 if errorlevel 1 (
     echo [error] Failed to prepare the runtime environment.
     pause
@@ -94,6 +94,7 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
+set "PYTHONPATH=%CD%\src"
 
 REM --------------- auto-open browser ---------------
 start "" cmd /c "timeout /t 3 /nobreak >nul && start http://%HOST%:%PORT%"
@@ -108,3 +109,12 @@ REM The environment is ready, so launch the module from the project virtualenv.
 ".venv\Scripts\python.exe" -m wukong_invite.webui --host %HOST% --port %PORT%
 
 pause
+exit /b 0
+
+:sync_env
+uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra tesseract
+if not errorlevel 1 exit /b 0
+echo [warn] First dependency sync failed. Retrying once...
+timeout /t 2 /nobreak >nul
+uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra tesseract
+exit /b %errorlevel%
