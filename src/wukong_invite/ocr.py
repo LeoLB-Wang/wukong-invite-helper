@@ -23,6 +23,8 @@ _OCR_CJK_STOP_WORDS = {
     "悟空官网获得",
 }
 
+_GRAY_BACKGROUND = 160
+
 
 def _has_cjk(text: str) -> bool:
     """Return True if *text* contains at least one CJK Unified Ideograph."""
@@ -33,6 +35,73 @@ def _count_cjk5_tokens(text: str) -> int:
     """Count distinct 5-char CJK tokens that are not stop words."""
     tokens = {t for t in _CJK_5_RE.findall(text) if t not in _OCR_CJK_STOP_WORDS}
     return len(tokens)
+
+
+def _crop_box_for_mode(size: tuple[int, int], mode: str) -> tuple[int, int, int, int]:
+    """Return a crop box aligned with the native macOS helper heuristics."""
+    width, height = size
+    left_ratio = 0.18
+    top_ratio = 0.02
+    crop_width_ratio = 0.54
+    crop_height_ratio = 0.20
+
+    if "tight" in mode:
+        left_ratio = 0.20
+        crop_width_ratio = 0.46
+        crop_height_ratio = 0.18
+    elif "wide" in mode:
+        left_ratio = 0.12
+        top_ratio = 0.01
+        crop_width_ratio = 0.62
+        crop_height_ratio = 0.24
+
+    left = int(round(width * left_ratio))
+    top = int(round(height * top_ratio))
+    right = left + int(round(width * crop_width_ratio))
+    bottom = top + int(round(height * crop_height_ratio))
+    return (left, top, min(right, width), min(bottom, height))
+
+
+def _mode_parameters(mode: str) -> tuple[float, float, int | None]:
+    """Return contrast, brightness and threshold for a preprocessing mode."""
+    contrast = 2.6
+    brightness = 18.0
+    threshold: int | None = None
+
+    if mode == "upper_soft":
+        contrast = 1.8
+        brightness = 26.0
+    elif mode == "upper_contrast":
+        contrast = 3.4
+        brightness = 8.0
+    elif mode.endswith("240"):
+        threshold = 240
+    elif mode.endswith("245"):
+        threshold = 245
+    elif mode.endswith("250"):
+        threshold = 250
+
+    return contrast, brightness, threshold
+
+
+def _compose_on_gray_background(image: Image.Image, gray_value: int = _GRAY_BACKGROUND) -> Image.Image:
+    """Composite an RGBA image onto a solid gray background."""
+    rgba = image.convert("RGBA")
+    background = Image.new("RGBA", rgba.size, (gray_value, gray_value, gray_value, 255))
+    return Image.alpha_composite(background, rgba)
+
+
+def _apply_mac_style_mode(image: Image.Image, mode: str) -> tuple[Image.Image, int]:
+    """Apply the macOS helper's grayscale enhancement pipeline to an image."""
+    contrast, brightness, threshold = _mode_parameters(mode)
+    gray = _compose_on_gray_background(image).convert("L")
+
+    if threshold is not None:
+        processed = gray.point(lambda p: 255 if p >= threshold else 0)
+        return processed, 6
+
+    processed = gray.point(lambda p: max(0, min(255, int(round(((p - 128) * contrast) + 128 + brightness)))))
+    return processed, 4
 
 
 def _preprocess_alpha(image_path: Path, temp_dir: Path) -> list[Path]:
@@ -85,6 +154,25 @@ def _preprocess_alpha(image_path: Path, temp_dir: Path) -> list[Path]:
     p4 = temp_dir / "alpha_upper_contrast_bin_3x.png"
     upper_bin_scaled.save(str(p4))
     candidates.append(p4)
+
+    upper_source = img.crop(_crop_box_for_mode((w, h), "upper"))
+    gray_modes = (
+        ("upper", "upper_gray_default_4x.png"),
+        ("upper_soft", "upper_gray_soft_4x.png"),
+        ("upper_contrast", "upper_gray_contrast_4x.png"),
+        ("upper_240", "upper_gray_threshold_240_6x.png"),
+        ("upper_245", "upper_gray_threshold_245_6x.png"),
+        ("upper_250", "upper_gray_threshold_250_6x.png"),
+    )
+    for mode, file_name in gray_modes:
+        processed, scale = _apply_mac_style_mode(upper_source, mode)
+        scaled_candidate = processed.resize(
+            (processed.width * scale, processed.height * scale),
+            Image.Resampling.LANCZOS,
+        )
+        candidate_path = temp_dir / file_name
+        scaled_candidate.save(str(candidate_path))
+        candidates.append(candidate_path)
 
     return candidates
 

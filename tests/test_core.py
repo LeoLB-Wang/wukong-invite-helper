@@ -11,6 +11,8 @@ from http.client import HTTPConnection
 from pathlib import Path
 from unittest.mock import patch
 
+from PIL import Image
+
 from wukong_invite.core import (
     extract_image_asset_id,
     extract_invite_code,
@@ -18,7 +20,7 @@ from wukong_invite.core import (
 )
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ops import cmd_fill_app
-from wukong_invite.ocr import VisionOCR, TesseractOCR, create_ocr
+from wukong_invite.ocr import VisionOCR, TesseractOCR, _preprocess_alpha, create_ocr
 from wukong_invite import cli
 
 
@@ -140,6 +142,43 @@ class VisionOCRTests(unittest.TestCase):
             self.assertEqual(
                 ocr.recognize_text(Path("/tmp/original.png")), "当前邀请码：金蝉脱凡壳"
             )
+
+    def test_preprocess_alpha_emits_mac_style_upper_crop_candidates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "input.png"
+            Image.new("RGBA", (100, 100), (255, 255, 255, 0)).save(image_path)
+
+            candidates = _preprocess_alpha(image_path, Path(temp_dir))
+            names = {path.name for path in candidates}
+
+            self.assertIn("upper_gray_default_4x.png", names)
+            self.assertIn("upper_gray_soft_4x.png", names)
+            self.assertIn("upper_gray_contrast_4x.png", names)
+            self.assertIn("upper_gray_threshold_240_6x.png", names)
+            self.assertIn("upper_gray_threshold_245_6x.png", names)
+            self.assertIn("upper_gray_threshold_250_6x.png", names)
+
+            default_candidate = next(path for path in candidates if path.name == "upper_gray_default_4x.png")
+            threshold_candidate = next(
+                path for path in candidates if path.name == "upper_gray_threshold_240_6x.png"
+            )
+            with Image.open(default_candidate) as default_image:
+                self.assertEqual(default_image.size, (216, 80))
+            with Image.open(threshold_candidate) as threshold_image:
+                self.assertEqual(threshold_image.size, (324, 120))
+
+    def test_preprocess_alpha_gray_background_candidate_avoids_black_background(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "input.png"
+            image = Image.new("RGBA", (100, 100), (255, 255, 255, 0))
+            image.putpixel((25, 5), (255, 255, 255, 160))
+            image.save(image_path)
+
+            candidates = _preprocess_alpha(image_path, Path(temp_dir))
+            default_candidate = next(path for path in candidates if path.name == "upper_gray_default_4x.png")
+            processed = Image.open(default_candidate).convert("L")
+
+            self.assertGreater(processed.getpixel((0, 0)), 0)
 
 
 class CreateOCRFactoryTests(unittest.TestCase):
