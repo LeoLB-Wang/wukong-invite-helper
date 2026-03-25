@@ -12,13 +12,19 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from wukong_invite.core import extract_image_asset_id, extract_invite_code, parse_js_payload
+from wukong_invite.core import (
+    extract_image_asset_id,
+    extract_invite_code,
+    parse_js_payload,
+)
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ocr import create_ocr
 from wukong_invite.ops import cmd_fill_app
 
 
-DEFAULT_JS_URL = "https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js"
+DEFAULT_JS_URL = (
+    "https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js"
+)
 
 
 def fetch_text(url: str) -> str:
@@ -36,16 +42,16 @@ def download_file(url: str, target: Path) -> None:
 def _best_effort_notify(code: str) -> None:
     try:
         copy_to_clipboard(code)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[wukong-invite-helper] clipboard error: {e}", file=sys.stderr)
     try:
         play_alert("Glass")
     except Exception:
         pass
     try:
         cmd_fill_app(code, no_submit=True)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[wukong-invite-helper] autofill error: {e}", file=sys.stderr)
 
 
 class InviteWatchService:
@@ -146,7 +152,9 @@ class InviteWatchService:
             if self._thread is not None and self._thread.is_alive():
                 return False
             self._stop_event = threading.Event()
-            self._thread = threading.Thread(target=self._run_loop, name="wukong-webui-watch", daemon=True)
+            self._thread = threading.Thread(
+                target=self._run_loop, name="wukong-webui-watch", daemon=True
+            )
             self._thread.start()
             self._log("watcher started")
             return True
@@ -439,7 +447,9 @@ def _render_html() -> bytes:
 """.encode("utf-8")
 
 
-def create_http_server(host: str, port: int, service: InviteWatchService) -> ThreadingHTTPServer:
+def create_http_server(
+    host: str, port: int, service: InviteWatchService
+) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             if self.path == "/":
@@ -455,11 +465,17 @@ def create_http_server(host: str, port: int, service: InviteWatchService) -> Thr
             payload = self._read_json()
             if route == "/api/start":
                 started = service.start()
-                self._send_json(200, {"status": "ok", "started": started, "state": service.snapshot()})
+                self._send_json(
+                    200,
+                    {"status": "ok", "started": started, "state": service.snapshot()},
+                )
                 return
             if route == "/api/stop":
                 stopped = service.stop()
-                self._send_json(200, {"status": "ok", "stopped": stopped, "state": service.snapshot()})
+                self._send_json(
+                    200,
+                    {"status": "ok", "stopped": stopped, "state": service.snapshot()},
+                )
                 return
             if route == "/api/retry":
                 self._send_json(200, service.retry_now())
@@ -467,7 +483,10 @@ def create_http_server(host: str, port: int, service: InviteWatchService) -> Thr
             if route == "/api/clear-seen-id":
                 asset_id = str(payload.get("asset_id", "")).strip()
                 cleared = service.clear_seen_id(asset_id) if asset_id else False
-                self._send_json(200, {"status": "ok", "cleared": cleared, "state": service.snapshot()})
+                self._send_json(
+                    200,
+                    {"status": "ok", "cleared": cleared, "state": service.snapshot()},
+                )
                 return
             self._send_json(404, {"status": "not_found"})
 
@@ -498,12 +517,24 @@ def create_http_server(host: str, port: int, service: InviteWatchService) -> Thr
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the local Web UI for Wukong invite watching.")
+    parser = argparse.ArgumentParser(
+        description="Run the local Web UI for Wukong invite watching."
+    )
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--port", type=int, default=8787, help="Port to bind")
-    parser.add_argument("--js-url", default=DEFAULT_JS_URL, help="JSONP endpoint that returns the image URL")
-    parser.add_argument("--interval", type=float, default=1.0, help="Polling interval in seconds")
-    parser.add_argument("--seen-ids-file", default="data/seen_ids.txt", help="File to persist seen asset IDs")
+    parser.add_argument(
+        "--js-url",
+        default=DEFAULT_JS_URL,
+        help="JSONP endpoint that returns the image URL",
+    )
+    parser.add_argument(
+        "--interval", type=float, default=1.0, help="Polling interval in seconds"
+    )
+    parser.add_argument(
+        "--seen-ids-file",
+        default="data/seen_ids.txt",
+        help="File to persist seen asset IDs",
+    )
     return parser
 
 

@@ -5,13 +5,21 @@ import re
 
 
 _CALLBACK_RE = re.compile(r"^\s*[A-Za-z_]\w*\((.*)\)\s*;?\s*$", re.DOTALL)
-_IMG_URL_RE = re.compile(r"https?://[^\s\"']+\.(?:png|jpg|jpeg|webp)(?:\?[^\s\"']*)?", re.IGNORECASE)
-_IMAGE_ASSET_ID_RE = re.compile(r"(\d+)-\d+-tps-\d+-\d+\.(?:png|jpg|jpeg|webp)(?:\?|$)", re.IGNORECASE)
+_IMG_URL_RE = re.compile(
+    r"https?://[^\s\"']+\.(?:png|jpg|jpeg|webp)(?:\?[^\s\"']*)?", re.IGNORECASE
+)
+_IMAGE_ASSET_ID_RE = re.compile(
+    r"(\d+)-\d+-tps-\d+-\d+\.(?:png|jpg|jpeg|webp)(?:\?|$)", re.IGNORECASE
+)
 _INVITE_CODE_PATTERNS = [
-    re.compile(r"当前邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
-    re.compile(r"邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
+    # CJK patterns — invite codes are known to be 5 Chinese characters.
     re.compile(r"当前邀请码\s*[:：]?\s*([\u4e00-\u9fff]{4,8})"),
     re.compile(r"邀请码\s*[:：]?\s*([\u4e00-\u9fff]{4,8})"),
+    re.compile(r"当前邀请码[^\n]{0,3}\s*\n\s*([\u4e00-\u9fff]{4,8})"),
+    re.compile(r"邀请码[^\n]{0,3}\s*\n\s*([\u4e00-\u9fff]{4,8})"),
+    # ASCII patterns — only used as last resort.
+    re.compile(r"当前邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
+    re.compile(r"邀请码\s*[:：]?\s*([A-Za-z0-9_-]+)"),
 ]
 _TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{6,}\b")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{4,8}")
@@ -61,11 +69,21 @@ def extract_invite_code(text: str) -> str:
     normalized = text.replace("\u3000", " ")
     normalized = _FRAGMENTED_CJK_SPACES_RE.sub("", normalized)
 
-    # --- Priority 1: labelled pattern (most reliable) ---
+    # --- Priority 1: labelled pattern — prefer CJK over ASCII ---
+    cjk_matches: list[str] = []
+    ascii_matches: list[str] = []
     for pattern in _INVITE_CODE_PATTERNS:
         match = pattern.search(normalized)
         if match:
-            return match.group(1).strip()
+            val = match.group(1).strip()
+            if any("\u4e00" <= ch <= "\u9fff" for ch in val):
+                cjk_matches.append(val)
+            else:
+                ascii_matches.append(val)
+    if cjk_matches:
+        return cjk_matches[0]
+    if ascii_matches:
+        return ascii_matches[0]
 
     # --- Priority 2: single 5-char CJK token ---
     cjk_candidates: list[str] = []
