@@ -5,7 +5,7 @@
 A lightweight watcher for Wukong invite images. It polls the official endpoint, OCRs unseen invite images, alerts on success, copies the invite code to the clipboard, and autofills `Wukong App` across platforms.
 
 > [!IMPORTANT]
-> Before using, download the [Wukong App](https://wukong.com), log in via DingTalk QR scan, and stay on the invite code input page.
+> Before using, download the [Wukong App](https://wukong.com), log in via DingTalk QR scan, and stay on the invite code input page.  **Click inside the invite-code input field so the cursor is active** — the autofill script sends keystrokes to whatever is focused and cannot click the field for you.
 
 ## One-Click Launch (Recommended)
 

@@ -158,13 +158,15 @@ def _fill_macos(submit: bool) -> None:
     """Activate Wukong and send keystrokes via osascript — no pyautogui needed."""
     enter_line = "\n    delay 0.3\n    keystroke return" if submit else ""
     script = (
-        'tell application "Wukong" to activate\n'
+        "tell application \"System Events\" to set frontmost of process \"DingTalkReal\" to true\n"
         "delay 1.0\n"
-        'tell application "System Events"\n'
-        '    keystroke "a" using command down\n'
-        "    delay 0.1\n"
-        '    keystroke "v" using command down'
+        "tell application \"System Events\"\n"
+        "    tell process \"DingTalkReal\"\n"
+        '        keystroke "a" using command down\n'
+        "        delay 0.1\n"
+        '        keystroke "v" using command down'
         f"{enter_line}\n"
+        "    end tell\n"
         "end tell"
     )
     subprocess.run(
