@@ -64,9 +64,9 @@ pause
 exit /b 0
 
 :sync_env
-uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra rapidocr
+uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project
 if not errorlevel 1 exit /b 0
 echo [warn] First dependency sync failed. Retrying once...
 timeout /t 2 /nobreak >nul
-uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra rapidocr
+uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project
 exit /b %errorlevel%

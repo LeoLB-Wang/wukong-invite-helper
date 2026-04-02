@@ -7,6 +7,7 @@ import io
 import json
 import threading
 import time
+import importlib
 from http.client import HTTPConnection
 from pathlib import Path
 from unittest.mock import patch
@@ -250,6 +251,23 @@ class NotifyTests(unittest.TestCase):
 
 
 class OpsTests(unittest.TestCase):
+    def test_ops_module_import_does_not_require_ocr_dependency(self) -> None:
+        import builtins
+        import sys
+
+        real_import = builtins.__import__
+        sys.modules.pop("wukong_invite.ops", None)
+
+        def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "wukong_invite.ocr":
+                raise ModuleNotFoundError("mock missing ocr dependency")
+            return real_import(name, globals, locals, fromlist, level)
+
+        with patch("builtins.__import__", side_effect=guarded_import):
+            ops_module = importlib.import_module("wukong_invite.ops")
+
+        self.assertTrue(hasattr(ops_module, "cmd_fill_app"))
+
     @patch("wukong_invite.autofill.fill_and_submit")
     def test_fill_app_delegates_to_autofill_with_submit(self, fill_mock) -> None:
         self.assertEqual(cmd_fill_app("春江花月夜", no_submit=False), 0)
@@ -847,9 +865,10 @@ exit 1
         self.assertIn('set "UV_CACHE_DIR=%CD%\\.uv-cache"', text)
         self.assertIn('set "UV_LINK_MODE=copy"', text)
         self.assertIn(
-            'uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project --extra rapidocr',
+            'uv sync --link-mode copy --cache-dir "%UV_CACHE_DIR%" --no-editable --no-install-project',
             text,
         )
+        self.assertNotIn("--extra rapidocr", text)
         self.assertIn('set "PYTHONPATH=%CD%\\src"', text)
         self.assertIn(
             "echo [warn] First dependency sync failed. Retrying once...", text

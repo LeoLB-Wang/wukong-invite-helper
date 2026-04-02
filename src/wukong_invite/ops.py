@@ -12,7 +12,6 @@ from wukong_invite.core import (
     parse_js_payload,
 )
 from wukong_invite.notify import copy_to_clipboard, play_alert
-from wukong_invite.ocr import create_ocr
 
 
 def cmd_parse_js() -> int:
@@ -45,6 +44,8 @@ def cmd_parse_api(field: Literal["code", "status", "next-release", "raw-code"]) 
 
 
 def cmd_extract_code(image: str) -> int:
+    from wukong_invite.ocr import create_ocr
+
     project_root = Path(__file__).resolve().parents[2]
     ocr = create_ocr(project_root)
     text = ocr.recognize_text(Path(image), project_root)
