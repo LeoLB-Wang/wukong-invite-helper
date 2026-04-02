@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import tempfile
 import threading
 import time
 from collections import deque
@@ -12,18 +11,13 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import urlparse
 
-from wukong_invite.core import (
-    extract_image_asset_id,
-    extract_invite_code,
-    parse_js_payload,
-)
+from wukong_invite.core import parse_invite_api_payload
 from wukong_invite.notify import copy_to_clipboard, play_alert
-from wukong_invite.ocr import create_ocr
 from wukong_invite.ops import cmd_fill_app
 
 
-DEFAULT_JS_URL = (
-    "https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js"
+DEFAULT_API_URL = (
+    "https://ai-table-api.dingtalk.com/v1/wukong/invite-code"
 )
 
 
@@ -49,7 +43,9 @@ def _best_effort_notify(code: str) -> None:
     except Exception:
         pass
     try:
-        cmd_fill_app(code, no_submit=True)
+        result = cmd_fill_app(code, no_submit=True)
+        if result != 0:
+            raise RuntimeError(f"fill-app exited with status {result}")
     except Exception as e:
         print(f"[wukong-invite-helper] autofill error: {e}", file=sys.stderr)
 
@@ -60,11 +56,11 @@ class InviteWatchService:
         project_root: Path,
         seen_ids_file: Path,
         *,
-        js_url: str = DEFAULT_JS_URL,
+        js_url: str = DEFAULT_API_URL,
         interval: float = 1.0,
         fetch_text_func: Callable[[str], str] = fetch_text,
         download_file_func: Callable[[str, Path], None] = download_file,
-        create_ocr_func: Callable[[Path], object] = create_ocr,
+        create_ocr_func: Callable[[Path], object] | None = None,
         notify_func: Callable[[str], None] = _best_effort_notify,
     ) -> None:
         self.project_root = project_root
@@ -83,13 +79,13 @@ class InviteWatchService:
         self._latest_code: str | None = None
         self._latest_asset_id: str | None = None
         self._latest_image_url: str | None = None
+        self._next_release_at: str | None = None
         self._last_success_at: str | None = None
         self._last_error: str | None = None
         self._last_result: str = "idle"
 
         self.seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
         self._seen_ids = self._load_seen_ids()
-        self._ocr = self.create_ocr(self.project_root)
         self._log(f"loaded {len(self._seen_ids)} seen id(s) from {self.seen_ids_file}")
 
     def _load_seen_ids(self) -> set[str]:
@@ -127,6 +123,7 @@ class InviteWatchService:
                 "latest_code": self._latest_code,
                 "latest_asset_id": self._latest_asset_id,
                 "latest_image_url": self._latest_image_url,
+                "next_release_at": self._next_release_at,
                 "last_success_at": self._last_success_at,
                 "last_error": self._last_error,
                 "last_result": self._last_result,
@@ -178,44 +175,44 @@ class InviteWatchService:
             self._stop_event.wait(self.interval)
 
     def _poll_once(self, *, force: bool) -> dict:
-        asset_id = None
         try:
             payload = self.fetch_text(self.js_url)
-            image_url = parse_js_payload(payload)
-            asset_id = extract_image_asset_id(image_url)
+            result = parse_invite_api_payload(payload)
             with self._lock:
-                self._latest_asset_id = asset_id
-                self._latest_image_url = image_url
-            if asset_id in self._seen_ids and not force:
+                self._next_release_at = result.next_release_at
+
+            if result.code:
+                code = result.code
                 with self._lock:
-                    self._last_result = "already_seen"
+                    self._latest_code = code
+                    self._last_success_at = time.strftime("%Y-%m-%d %H:%M:%S")
+                    self._last_result = "ok"
                     self._last_error = None
-                return {"status": "already_seen", "asset_id": asset_id}
+                self.notify(code)
+                self._log(f"invite code ready [{code}]")
+                return {"status": "ok", "code": code}
 
-            with tempfile.TemporaryDirectory(prefix="wukong-webui-") as temp_dir:
-                image_path = Path(temp_dir) / "invite.png"
-                self.download_file(image_url, image_path)
-                text = self._ocr.recognize_text(image_path, self.project_root)
-
-            code = extract_invite_code(text)
+            message = "invite code not released yet"
+            if result.next_release_at:
+                message = f"{message}; next release at {result.next_release_at}"
+            elif result.raw_code:
+                message = f"{message}; current code is {result.raw_code}"
             with self._lock:
-                self._latest_code = code
-                self._last_success_at = time.strftime("%Y-%m-%d %H:%M:%S")
-                self._last_result = "ok"
+                self._latest_code = None
+                self._last_result = "waiting"
                 self._last_error = None
-                self._append_seen_id(asset_id)
-            self.notify(code)
-            self._log(f"invite code ready [{code}]")
-            return {"status": "ok", "asset_id": asset_id, "code": code}
+            self._log(message)
+            return {
+                "status": "waiting",
+                "next_release_at": result.next_release_at,
+                "raw_code": result.raw_code,
+            }
         except Exception as exc:  # noqa: BLE001
             with self._lock:
                 self._last_error = str(exc)
                 self._last_result = "error"
-            if asset_id:
-                self._log(f"processing failed for asset id [{asset_id}]: {exc}")
-            else:
-                self._log(f"processing failed: {exc}")
-            return {"status": "error", "error": str(exc), "asset_id": asset_id}
+            self._log(f"processing failed: {exc}")
+            return {"status": "error", "error": str(exc)}
 
 
 def _render_html() -> bytes:
@@ -269,7 +266,7 @@ def _render_html() -> bytes:
     <div class="hero">
       <div class="card">
         <h1>Wukong Invite Helper</h1>
-        <div class="muted">开始监听、停止监听、清空指定 seen_id、手动重试当前图片。</div>
+        <div class="muted">开始监听、停止监听、手动重试当前邀请码接口。</div>
         <div id="successBanner" class="banner">已发现可用邀请码。</div>
       </div>
     </div>
@@ -284,20 +281,10 @@ def _render_html() -> bytes:
             <button class="warn" data-label="手动重试" onclick="post('/api/retry', null, this)">手动重试</button>
           </div>
           <div class="muted" style="margin-top:10px">
-            开始监听后会按设定间隔持续轮询最新图片；停止监听后会结束后台轮询。
+            开始监听后会按设定间隔持续轮询邀请码接口；停止监听后会结束后台轮询。
           </div>
           <div class="muted" style="margin-top:6px">
-            手动重试会立即对当前最新图片再执行一次 OCR 和提取流程，不需要等待下一轮轮询，也不受监听是否开启影响。
-          </div>
-        </div>
-        <div class="console-panel">
-          <div class="console-label">seen_id 管理</div>
-          <div class="console-actions">
-            <input id="assetIdInput" placeholder="输入要清理的 seen_id">
-            <button class="alt" data-label="清空指定 seen_id" onclick="clearSeenId(this)">清空指定 seen_id</button>
-          </div>
-          <div class="muted" style="margin-top:10px">
-            清空指定 seen_id 后，当前 asset_id 会重新变成可处理状态。
+            手动重试会立即重新请求当前邀请码接口，不需要等待下一轮轮询，也不受监听是否开启影响。
           </div>
         </div>
       </div>
@@ -305,7 +292,7 @@ def _render_html() -> bytes:
         <h2>当前状态</h2>
         <div>运行状态：<span id="running" class="status-pill status-stopped">已停止</span></div>
         <div style="margin-top:10px">下次刷新：<strong id="countdownValue">-</strong></div>
-        <div style="margin-top:10px">最新 asset_id：<strong id="assetId">-</strong></div>
+        <div style="margin-top:10px">下个放量时间：<strong id="nextReleaseAt">-</strong></div>
         <div style="margin-top:10px">最新邀请码：</div>
         <div id="latestCode" class="code">-</div>
         <div class="row" style="margin-top:12px">
@@ -314,10 +301,6 @@ def _render_html() -> bytes:
         <div style="margin-top:10px">最近一次成功时间：<span id="lastSuccessAt">-</span></div>
         <div style="margin-top:10px">最新结果：<span id="lastResult">-</span></div>
         <div style="margin-top:10px">最近错误：<span id="lastError" class="muted">-</span></div>
-      </div>
-      <div class="card">
-        <h2>已处理 seen_id</h2>
-        <pre id="seenIds"></pre>
       </div>
       <div class="card wide">
         <h2>最近日志</h2>
@@ -347,15 +330,6 @@ def _render_html() -> bytes:
         return data;
       } finally {
         setButtonLoading(button, false);
-      }
-    }
-    async function clearSeenId(button) {
-      const assetId = document.getElementById('assetIdInput').value.trim();
-      if (!assetId) return;
-      const result = await post('/api/clear-seen-id', {asset_id: assetId}, button);
-      document.getElementById('assetIdInput').value = '';
-      if (result && result.cleared) {
-        showToast('已清空 seen_id');
       }
     }
     async function copyCode(button) {
@@ -413,7 +387,7 @@ def _render_html() -> bytes:
           line.className = 'log-line log-success';
         } else if (lowered.includes('failed') || lowered.includes('error')) {
           line.className = 'log-line log-error';
-        } else if (lowered.includes('already') || lowered.includes('cleared')) {
+        } else if (lowered.includes('waiting') || lowered.includes('next release')) {
           line.className = 'log-line log-warn';
         }
         line.textContent = entry;
@@ -428,12 +402,11 @@ def _render_html() -> bytes:
       running.textContent = data.running ? '监听中' : '已停止';
       running.className = data.running ? 'status-pill status-running' : 'status-pill status-stopped';
       document.getElementById('lastSuccessAt').textContent = data.last_success_at || '-';
-      document.getElementById('assetId').textContent = data.latest_asset_id || '-';
+      document.getElementById('nextReleaseAt').textContent = data.next_release_at || '-';
       document.getElementById('latestCode').textContent = data.latest_code || '-';
       document.getElementById('lastResult').textContent = data.last_result || '-';
       document.getElementById('lastError').textContent = data.last_error || '-';
       renderLogs(data.logs || []);
-      document.getElementById('seenIds').textContent = (data.seen_ids || []).join('\\n');
       if (data.latest_code) {
         showBanner(`已发现可用邀请码：${data.latest_code}`);
       }
@@ -480,14 +453,6 @@ def create_http_server(
             if route == "/api/retry":
                 self._send_json(200, service.retry_now())
                 return
-            if route == "/api/clear-seen-id":
-                asset_id = str(payload.get("asset_id", "")).strip()
-                cleared = service.clear_seen_id(asset_id) if asset_id else False
-                self._send_json(
-                    200,
-                    {"status": "ok", "cleared": cleared, "state": service.snapshot()},
-                )
-                return
             self._send_json(404, {"status": "not_found"})
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A003
@@ -523,9 +488,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     parser.add_argument("--port", type=int, default=8787, help="Port to bind")
     parser.add_argument(
+        "--api-url",
         "--js-url",
-        default=DEFAULT_JS_URL,
-        help="JSONP endpoint that returns the image URL",
+        dest="js_url",
+        default=DEFAULT_API_URL,
+        help="Invite code API endpoint",
     )
     parser.add_argument(
         "--interval", type=float, default=1.0, help="Polling interval in seconds"
@@ -533,7 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--seen-ids-file",
         default="data/seen_ids.txt",
-        help="File to persist seen asset IDs",
+        help="Deprecated legacy option; kept for CLI compatibility",
     )
     return parser
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 import re
 
@@ -24,6 +25,7 @@ _INVITE_CODE_PATTERNS = [
 _TOKEN_RE = re.compile(r"\b[A-Za-z0-9_-]{6,}\b")
 _CJK_TOKEN_RE = re.compile(r"[\u4e00-\u9fff]{4,8}")
 _FRAGMENTED_CJK_SPACES_RE = re.compile(r"(?<=[\u4e00-\u9fff])[ \t]+(?=[\u4e00-\u9fff])")
+_READY_INVITE_CODE_RE = re.compile(r"^[\u4e00-\u9fff]{5}$")
 _CJK_STOP_WORDS = {
     "限量",
     "已领完",
@@ -35,6 +37,50 @@ _CJK_STOP_WORDS = {
     "悟空官网获得",
     "悟空出世",
 }
+
+
+@dataclass(frozen=True)
+class InviteAPIResult:
+    """Normalized invite API payload."""
+
+    status: str
+    code: str | None
+    raw_code: str | None
+    next_release_at: str | None
+
+
+def parse_invite_api_payload(payload: str) -> InviteAPIResult:
+    """Parse the direct invite API JSON payload."""
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Could not parse invite API payload as JSON") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("Invite API payload must be a JSON object")
+
+    raw_code = data.get("code")
+    if raw_code is not None and not isinstance(raw_code, str):
+        raise ValueError("Invite API code field must be a string")
+
+    next_release_at = data.get("nextReleaseAt")
+    if next_release_at is not None and not isinstance(next_release_at, str):
+        raise ValueError("Invite API nextReleaseAt field must be a string")
+
+    if isinstance(raw_code, str) and _READY_INVITE_CODE_RE.fullmatch(raw_code):
+        return InviteAPIResult(
+            status="ready",
+            code=raw_code,
+            raw_code=raw_code,
+            next_release_at=next_release_at,
+        )
+
+    return InviteAPIResult(
+        status="waiting",
+        code=None,
+        raw_code=raw_code,
+        next_release_at=next_release_at,
+    )
 
 
 def parse_js_payload(payload: str) -> str:

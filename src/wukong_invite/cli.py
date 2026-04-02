@@ -2,25 +2,19 @@ from __future__ import annotations
 
 import argparse
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Final
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from wukong_invite.core import (
-    extract_image_asset_id,
-    extract_invite_code,
-    parse_js_payload,
-)
+from wukong_invite.core import parse_invite_api_payload
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ops import cmd_fill_app
-from wukong_invite.ocr import OCREngine, create_ocr
 
 
-DEFAULT_JS_URL: Final[str] = (
-    "https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js"
+DEFAULT_API_URL: Final[str] = (
+    "https://ai-table-api.dingtalk.com/v1/wukong/invite-code"
 )
 USER_AGENT: Final[str] = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -41,6 +35,7 @@ def fetch_text(url: str) -> str:
 
 
 def download_file(url: str, target: Path) -> None:
+    """Download a binary payload to disk."""
     request = Request(
         url, headers={"User-Agent": USER_AGENT, "Cache-Control": "no-cache"}
     )
@@ -51,14 +46,17 @@ def download_file(url: str, target: Path) -> None:
         raise RuntimeError(f"request failed for {url}: {exc}") from exc
 
 
-def run_once(js_url: str, ocr: OCREngine, project_root: Path) -> str:
-    payload = fetch_text(js_url)
-    image_url = parse_js_payload(payload)
-    with tempfile.TemporaryDirectory(prefix="wukong-invite-") as temp_dir:
-        image_path = Path(temp_dir) / "invite.png"
-        download_file(image_url, image_path)
-        text = ocr.recognize_text(image_path, project_root)
-    return extract_invite_code(text)
+def run_once(api_url: str) -> str:
+    """Fetch the current invite code once from the direct JSON API."""
+    payload = fetch_text(api_url)
+    result = parse_invite_api_payload(payload)
+    if result.code:
+        return result.code
+    next_release_at = result.next_release_at or "unknown"
+    raw_code = result.raw_code or "<missing>"
+    raise RuntimeError(
+        f"invite code not released yet: raw_code={raw_code} next_release_at={next_release_at}"
+    )
 
 
 def _load_seen_ids(path: Path) -> set[str]:
@@ -94,9 +92,20 @@ def _best_effort_notify(code: str) -> None:
     except Exception:
         pass
     try:
-        cmd_fill_app(code, no_submit=False)
+        result = cmd_fill_app(code, no_submit=False)
+        if result != 0:
+            raise RuntimeError(f"fill-app exited with status {result}")
     except Exception as e:
         _log(f"autofill error: {e}")
+
+
+def _build_wait_message(next_release_at: str | None, raw_code: str | None) -> str:
+    """Describe why the invite code is not usable yet."""
+    if next_release_at:
+        return f"invite code not released yet; next release at {next_release_at}"
+    if raw_code:
+        return f"invite code not released yet; current code is {raw_code}"
+    return "invite code not released yet"
 
 
 def watch(
@@ -106,30 +115,24 @@ def watch(
     project_root: Path,
     seen_ids_file: Path,
 ) -> int:
-    ocr = create_ocr(project_root)
     deadline = time.time() + timeout_seconds
-    seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
-    seen_ids = _load_seen_ids(seen_ids_file)
     last_error = None
+    last_wait_message = None
 
     while time.time() < deadline:
-        asset_id = None
         try:
             payload = fetch_text(js_url)
-            image_url = parse_js_payload(payload)
-            asset_id = extract_image_asset_id(image_url)
-            if asset_id not in seen_ids:
-                with tempfile.TemporaryDirectory(prefix="wukong-invite-") as temp_dir:
-                    image_path = Path(temp_dir) / "invite.png"
-                    download_file(image_url, image_path)
-                    text = ocr.recognize_text(image_path, project_root)
-                code = extract_invite_code(text)
-                seen_ids.add(asset_id)
-                _append_seen_id(seen_ids_file, asset_id)
-                _log(f"saved seen asset id [{asset_id}] to {seen_ids_file}")
+            result = parse_invite_api_payload(payload)
+            if result.code:
+                code = result.code
+                _log(f"invite code ready [{code}]")
                 _best_effort_notify(code)
                 print(code)
                 return 0
+            last_wait_message = _build_wait_message(
+                result.next_release_at, result.raw_code
+            )
+            _log(last_wait_message)
         except (ValueError, RuntimeError) as exc:
             last_error = exc
 
@@ -137,6 +140,8 @@ def watch(
 
     if last_error:
         print(f"timeout without invite code: {last_error}", file=sys.stderr)
+    elif last_wait_message:
+        print(f"timeout without invite code: {last_wait_message}", file=sys.stderr)
     else:
         print("timeout without invite code", file=sys.stderr)
     return 1
@@ -147,9 +152,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Fetch and extract the current Wukong invite code."
     )
     parser.add_argument(
+        "--api-url",
         "--js-url",
-        default=DEFAULT_JS_URL,
-        help="JSONP endpoint that returns the image URL",
+        dest="js_url",
+        default=DEFAULT_API_URL,
+        help="Invite code API endpoint",
     )
     parser.add_argument(
         "--interval", type=float, default=1.0, help="Polling interval in seconds"
@@ -163,7 +170,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--seen-ids-file",
         default="data/seen_ids.txt",
-        help="File to persist seen asset IDs (one per line)",
+        help="Deprecated legacy option; kept for CLI compatibility",
     )
     return parser
 

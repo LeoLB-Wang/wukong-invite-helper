@@ -169,12 +169,14 @@ def _fill_macos(submit: bool) -> None:
         "    end tell\n"
         "end tell"
     )
-    subprocess.run(
+    result = subprocess.run(
         ["osascript", "-e", script],
-        check=True,
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"osascript exited with code {result.returncode}")
 
 
 def _send_paste_win32() -> None:
@@ -307,3 +309,4 @@ def fill_and_submit(code: str, submit: bool = False) -> None:
             copy_to_clipboard(code)
         except Exception:
             pass
+        raise RuntimeError(str(e)) from e

@@ -49,7 +49,7 @@ fi
 export PYTHONPATH="$ROOT_DIR/src"
 
 # --------------- config ---------------
-JS_URL="${1:-https://hudong.alicdn.com/api/data/v2/438eae9715f945468d599660d2d92aeb.js}"
+API_URL="${1:-https://ai-table-api.dingtalk.com/v1/wukong/invite-code}"
 INTERVAL="${INTERVAL:-1}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
 ENABLE_CLIPBOARD="${ENABLE_CLIPBOARD:-1}"
@@ -60,94 +60,45 @@ AUTO_SUBMIT_APP="${AUTO_SUBMIT_APP:-1}"
 DEADLINE=$(( $(date +%s) + TIMEOUT_SECONDS ))
 ATTEMPT=0
 
-# --------------- seen asset IDs (file-backed) ---------------
-SEEN_IDS_FILE="${SEEN_IDS_FILE:-$ROOT_DIR/data/seen_ids.txt}"
-mkdir -p "$(dirname "$SEEN_IDS_FILE")"
-touch "$SEEN_IDS_FILE"
-
-declare -A SEEN_IDS
-_LOADED_COUNT=0
-while IFS= read -r _line; do
-  _line="${_line%%#*}"
-  _line="$(echo "$_line" | tr -d '[:space:]')"
-  if [ -n "$_line" ]; then
-    SEEN_IDS["$_line"]=1
-    _LOADED_COUNT=$((_LOADED_COUNT + 1))
-  fi
-done < "$SEEN_IDS_FILE"
-log "loaded ${_LOADED_COUNT} seen id(s) from $SEEN_IDS_FILE"
-
-# --------------- temp dir helper ---------------
-make_tmp_dir() {
-  if [ "$IS_MACOS" = "1" ]; then
-    mktemp -d /tmp/wukong-invite.XXXXXX
-  else
-    mktemp -d "${TEMP:-/tmp}/wukong-invite.XXXXXX"
-  fi
-}
-
-log "starting watcher: interval=${INTERVAL}s timeout=${TIMEOUT_SECONDS}s url=${JS_URL} os=${OS_TYPE}"
+log "starting watcher: interval=${INTERVAL}s timeout=${TIMEOUT_SECONDS}s url=${API_URL} os=${OS_TYPE}"
 
 # --------------- main loop ---------------
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   ATTEMPT=$((ATTEMPT + 1))
   log "poll attempt #${ATTEMPT}"
-  if PAYLOAD="$(curl -fsSL -H 'Cache-Control: no-cache' "$JS_URL" 2>/dev/null)"; then
-    if IMAGE_URL="$(printf '%s' "$PAYLOAD" | python -m wukong_invite.ops parse-js 2>/dev/null)"; then
-      if [ -n "$IMAGE_URL" ]; then
-        ASSET_ID="$(python -m wukong_invite.ops image-key --url "$IMAGE_URL" 2>/dev/null)" || ASSET_ID=""
-        if [ -z "$ASSET_ID" ]; then
-          log "failed to extract asset id from image url"
-        elif [ -n "${SEEN_IDS[$ASSET_ID]+_}" ]; then
-          log "asset id [${ASSET_ID}] already seen"
-        else
-          log "detected new asset id [${ASSET_ID}]"
-          TMP_DIR="$(make_tmp_dir)"
-          IMAGE_PATH="$TMP_DIR/invite.png"
-          SHOULD_MARK_SEEN=1
-          if curl -fsSL -H 'Cache-Control: no-cache' -o "$IMAGE_PATH" "$IMAGE_URL" 2>/dev/null; then
-            if CODE="$(python -m wukong_invite.ops extract-code --image "$IMAGE_PATH" 2>/dev/null)"; then
-              log "ocr extracted invite code successfully"
-              SEEN_IDS["$ASSET_ID"]=1
-              echo "$ASSET_ID" >> "$SEEN_IDS_FILE"
-              log "saved seen asset id [${ASSET_ID}] to $SEEN_IDS_FILE"
-              NOTIFY_ARGS=(--code "$CODE" --sound-name "$SOUND_NAME")
-              if [ "$ENABLE_CLIPBOARD" != "1" ]; then
-                NOTIFY_ARGS+=(--no-clipboard)
-              fi
-              if [ "$ENABLE_SOUND" != "1" ]; then
-                NOTIFY_ARGS+=(--no-sound)
-              fi
-              python -m wukong_invite.ops notify "${NOTIFY_ARGS[@]}" >/dev/null 2>&1 || true
-              if [ "$AUTO_FILL_APP" = "1" ]; then
-                FILL_ARGS=(--code "$CODE")
-                if [ "$AUTO_SUBMIT_APP" != "1" ]; then
-                  FILL_ARGS+=(--no-submit)
-                fi
-                python -m wukong_invite.ops fill-app "${FILL_ARGS[@]}" >/dev/null 2>&1 || true
-              fi
-              printf '%s\n' "$CODE"
-              rm -rf "$TMP_DIR"
-              exit 0
-            fi
-            log "ocr did not return a usable invite code"
-            SHOULD_MARK_SEEN=0
-          else
-            log "failed to download invite image"
-          fi
-          rm -rf "$TMP_DIR"
-          if [ "$SHOULD_MARK_SEEN" != "1" ]; then
-            log "keeping asset id [${ASSET_ID}] eligible for retry"
-          fi
-        fi
-      else
-        log "parsed image url was empty"
+  if PAYLOAD="$(curl -fsSL -H 'Cache-Control: no-cache' "$API_URL" 2>/dev/null)"; then
+    if CODE="$(printf '%s' "$PAYLOAD" | python -m wukong_invite.ops parse-api --field code 2>/dev/null)"; then
+      log "invite code ready [${CODE}]"
+      NOTIFY_ARGS=(--code "$CODE" --sound-name "$SOUND_NAME")
+      if [ "$ENABLE_CLIPBOARD" != "1" ]; then
+        NOTIFY_ARGS+=(--no-clipboard)
       fi
+      if [ "$ENABLE_SOUND" != "1" ]; then
+        NOTIFY_ARGS+=(--no-sound)
+      fi
+      python -m wukong_invite.ops notify "${NOTIFY_ARGS[@]}" >/dev/null 2>&1 || true
+      if [ "$AUTO_FILL_APP" = "1" ]; then
+        FILL_ARGS=(--code "$CODE")
+        if [ "$AUTO_SUBMIT_APP" != "1" ]; then
+          FILL_ARGS+=(--no-submit)
+        fi
+        python -m wukong_invite.ops fill-app "${FILL_ARGS[@]}" >/dev/null 2>&1 || true
+      fi
+      printf '%s\n' "$CODE"
+      exit 0
     else
-      log "failed to parse image url from payload"
+      NEXT_RELEASE_AT="$(printf '%s' "$PAYLOAD" | python -m wukong_invite.ops parse-api --field next-release 2>/dev/null || true)"
+      RAW_CODE="$(printf '%s' "$PAYLOAD" | python -m wukong_invite.ops parse-api --field raw-code 2>/dev/null || true)"
+      if [ -n "$NEXT_RELEASE_AT" ]; then
+        log "invite code not released yet; next release at ${NEXT_RELEASE_AT}"
+      elif [ -n "$RAW_CODE" ]; then
+        log "invite code not released yet; current code is ${RAW_CODE}"
+      else
+        log "invite code not released yet"
+      fi
     fi
   else
-    log "failed to fetch js payload"
+    log "failed to fetch invite api payload"
   fi
   sleep "$INTERVAL"
 done

@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import argparse
 import sys
+from typing import Literal
 from pathlib import Path
 
-from wukong_invite.core import extract_image_asset_id, extract_invite_code, parse_js_payload
+from wukong_invite.core import (
+    extract_image_asset_id,
+    extract_invite_code,
+    parse_invite_api_payload,
+    parse_js_payload,
+)
 from wukong_invite.notify import copy_to_clipboard, play_alert
 from wukong_invite.ocr import create_ocr
 
@@ -13,6 +19,29 @@ def cmd_parse_js() -> int:
     payload = sys.stdin.read()
     print(parse_js_payload(payload))
     return 0
+
+
+def cmd_parse_api(field: Literal["code", "status", "next-release", "raw-code"]) -> int:
+    """Read invite API JSON from stdin and print a selected field."""
+    payload = sys.stdin.read()
+    result = parse_invite_api_payload(payload)
+    if field == "code":
+        if not result.code:
+            return 1
+        print(result.code)
+        return 0
+    if field == "status":
+        print(result.status)
+        return 0
+    if field == "next-release":
+        if result.next_release_at:
+            print(result.next_release_at)
+        return 0
+    if field == "raw-code":
+        if result.raw_code:
+            print(result.raw_code)
+        return 0
+    raise ValueError(f"Unsupported parse-api field: {field}")
 
 
 def cmd_extract_code(image: str) -> int:
@@ -52,6 +81,9 @@ def cmd_fill_app(code: str, no_submit: bool) -> int:
             file=sys.stderr,
         )
         return 1
+    except Exception as exc:  # noqa: BLE001
+        print(f"autofill failed: {exc}", file=sys.stderr)
+        return 1
     return 0
 
 
@@ -60,6 +92,16 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("parse-js", help="Read JSONP payload from stdin and print the image URL")
+    parse_api_parser = subparsers.add_parser(
+        "parse-api",
+        help="Read invite API JSON from stdin and print a selected field",
+    )
+    parse_api_parser.add_argument(
+        "--field",
+        choices=["code", "status", "next-release", "raw-code"],
+        required=True,
+        help="Which parsed field to print",
+    )
 
     image_key_parser = subparsers.add_parser("image-key", help="Extract the numeric asset id from an invite image URL")
     image_key_parser.add_argument("--url", required=True, help="Invite image URL")
@@ -85,6 +127,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "parse-js":
         return cmd_parse_js()
+    if args.command == "parse-api":
+        return cmd_parse_api(args.field)
     if args.command == "extract-code":
         return cmd_extract_code(args.image)
     if args.command == "image-key":

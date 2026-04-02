@@ -16,6 +16,7 @@ from PIL import Image
 from wukong_invite.core import (
     extract_image_asset_id,
     extract_invite_code,
+    parse_invite_api_payload,
     parse_js_payload,
 )
 from wukong_invite.notify import copy_to_clipboard, play_alert
@@ -49,6 +50,30 @@ class ParseJsPayloadTests(unittest.TestCase):
     def test_extract_image_asset_id_rejects_unknown_pattern(self) -> None:
         with self.assertRaises(ValueError):
             extract_image_asset_id("https://example.com/invite.png")
+
+
+class ParseInviteApiPayloadTests(unittest.TestCase):
+    def test_parse_ready_code_from_json_payload(self) -> None:
+        payload = '{"code":"春江花月夜"}'
+
+        result = parse_invite_api_payload(payload)
+
+        self.assertEqual(result.status, "ready")
+        self.assertEqual(result.code, "春江花月夜")
+        self.assertIsNone(result.next_release_at)
+
+    def test_parse_waiting_status_when_code_is_not_five_chinese_chars(self) -> None:
+        payload = (
+            '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__",'
+            '"nextReleaseAt":"2026-04-02T02:00:00.000Z"}'
+        )
+
+        result = parse_invite_api_payload(payload)
+
+        self.assertEqual(result.status, "waiting")
+        self.assertIsNone(result.code)
+        self.assertEqual(result.raw_code, "__WUKONG_INVITE_CODE_EXHAUSTED__")
+        self.assertEqual(result.next_release_at, "2026-04-02T02:00:00.000Z")
 
 
 class CliHttpTests(unittest.TestCase):
@@ -240,6 +265,16 @@ class OpsTests(unittest.TestCase):
             result = cmd_fill_app("CODE123", no_submit=False)
         self.assertEqual(result, 1)
 
+    @patch(
+        "wukong_invite.autofill.fill_and_submit",
+        side_effect=RuntimeError("mock autofill failure"),
+    )
+    def test_fill_app_returns_1_when_autofill_fails(self, _fill_mock) -> None:
+        with patch("sys.stderr", new_callable=io.StringIO) as stderr:
+            result = cmd_fill_app("春江花月夜", no_submit=False)
+        self.assertEqual(result, 1)
+        self.assertIn("mock autofill failure", stderr.getvalue())
+
 
 class AutofillTests(unittest.TestCase):
     @patch("wukong_invite.autofill.subprocess.run")
@@ -250,6 +285,8 @@ class AutofillTests(unittest.TestCase):
     ) -> None:
         from wukong_invite.autofill import fill_and_submit
 
+        run_mock.return_value.returncode = 0
+        run_mock.return_value.stderr = ""
         fill_and_submit("WUKONG2026", submit=True)
         clip_mock.assert_called_once_with("WUKONG2026")
         run_mock.assert_called_once()
@@ -265,12 +302,28 @@ class AutofillTests(unittest.TestCase):
     ) -> None:
         from wukong_invite.autofill import fill_and_submit
 
+        run_mock.return_value.returncode = 0
+        run_mock.return_value.stderr = ""
         fill_and_submit("WUKONG2026", submit=False)
         clip_mock.assert_called_once_with("WUKONG2026")
         run_mock.assert_called_once()
         script = run_mock.call_args.args[0][2]
         self.assertIn('keystroke "v" using command down', script)
         self.assertNotIn("keystroke return", script)
+
+    @patch("wukong_invite.autofill.subprocess.run")
+    @patch("wukong_invite.autofill.copy_to_clipboard")
+    @patch("wukong_invite.autofill.platform.system", return_value="Darwin")
+    def test_fill_macos_raises_after_restoring_clipboard_on_failure(
+        self, _sys, clip_mock, run_mock
+    ) -> None:
+        from wukong_invite.autofill import fill_and_submit
+
+        run_mock.return_value.returncode = 1
+        run_mock.return_value.stderr = "mock osascript denied"
+        with self.assertRaisesRegex(RuntimeError, "mock osascript denied"):
+            fill_and_submit("WUKONG2026", submit=True)
+        self.assertEqual(clip_mock.call_count, 2)
 
     @patch("wukong_invite.autofill.time.sleep")
     @patch("wukong_invite.autofill.activate_wukong_window")
@@ -292,167 +345,180 @@ class AutofillTests(unittest.TestCase):
 
 
 class WatchTests(unittest.TestCase):
-    def test_watch_processes_current_asset_if_not_in_seen_ids(self) -> None:
+    def test_watch_returns_direct_code_when_json_payload_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
             seen_ids_file = project_root / "data" / "seen_ids.txt"
-            seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
-            seen_ids_file.write_text("6000000001111\n")
-
-            ocr = unittest.mock.Mock()
-            ocr.recognize_text.return_value = "当前邀请码：春江花月夜"
 
             with (
-                patch("wukong_invite.cli.create_ocr", return_value=ocr),
                 patch(
                     "wukong_invite.cli.fetch_text",
-                    return_value='img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})',
+                    return_value='{"code":"春江花月夜"}',
                 ),
-                patch("wukong_invite.cli.download_file"),
                 patch("wukong_invite.cli.copy_to_clipboard") as copy_mock,
                 patch("wukong_invite.cli.play_alert") as alert_mock,
                 patch("wukong_invite.cli.cmd_fill_app", return_value=0) as fill_mock,
-                patch(
-                    "wukong_invite.cli.time.time",
-                    side_effect=[100.0, 100.1, 100.2, 101.1],
-                ),
+                patch("wukong_invite.cli.time.time", side_effect=[100.0, 100.1]),
                 patch("sys.stderr", new_callable=io.StringIO) as stderr,
                 patch("sys.stdout", new_callable=io.StringIO) as stdout,
             ):
                 exit_code = cli.watch(
-                    js_url="https://example.com/invite.js",
+                    js_url="https://example.com/invite-code",
                     interval=0,
                     timeout_seconds=1,
                     project_root=project_root,
                     seen_ids_file=seen_ids_file,
                 )
-                seen_ids_content = seen_ids_file.read_text()
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(stdout.getvalue(), "春江花月夜\n")
         copy_mock.assert_called_once_with("春江花月夜")
         alert_mock.assert_called_once_with("Glass")
         fill_mock.assert_called_once_with("春江花月夜", no_submit=False)
-        self.assertEqual(seen_ids_content, "6000000001111\n6000000009999\n")
-        self.assertIn("saved seen asset id [6000000009999]", stderr.getvalue())
+        self.assertIn("invite code ready [春江花月夜]", stderr.getvalue())
 
-    def test_watch_retries_same_new_asset_when_ocr_fails(self) -> None:
+    def test_watch_retries_until_next_release_window_opens(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
             seen_ids_file = project_root / "data" / "seen_ids.txt"
-            seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
-            seen_ids_file.write_text("6000000001111\n")
-
-            ocr = unittest.mock.Mock()
-            ocr.recognize_text.side_effect = RuntimeError("ocr failed")
 
             with (
-                patch("wukong_invite.cli.create_ocr", return_value=ocr),
                 patch(
                     "wukong_invite.cli.fetch_text",
                     side_effect=[
-                        'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01NewAsset_!!6000000009999-2-tps-1773-540.png"})',
-                        'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01NewAsset_!!6000000009999-2-tps-1773-540.png"})',
+                        '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__",'
+                        '"nextReleaseAt":"2026-04-02T02:00:00.000Z"}',
+                        '{"code":"春江花月夜"}',
                     ],
                 ),
-                patch("wukong_invite.cli.download_file"),
+                patch("wukong_invite.cli.time.sleep") as sleep_mock,
+                patch("wukong_invite.cli.copy_to_clipboard"),
+                patch("wukong_invite.cli.play_alert"),
+                patch("wukong_invite.cli.cmd_fill_app", return_value=0),
+                patch(
+                    "wukong_invite.cli.time.time",
+                    side_effect=[100.0, 100.1, 100.2],
+                ),
+                patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            ):
+                exit_code = cli.watch(
+                    js_url="https://example.com/invite-code",
+                    interval=0,
+                    timeout_seconds=1,
+                    project_root=project_root,
+                    seen_ids_file=seen_ids_file,
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "春江花月夜\n")
+        sleep_mock.assert_called_once_with(0)
+
+    def test_watch_logs_autofill_error_when_fill_app_returns_non_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            seen_ids_file = project_root / "data" / "seen_ids.txt"
+
+            with (
+                patch(
+                    "wukong_invite.cli.fetch_text",
+                    return_value='{"code":"春江花月夜"}',
+                ),
+                patch("wukong_invite.cli.copy_to_clipboard"),
+                patch("wukong_invite.cli.play_alert"),
+                patch("wukong_invite.cli.cmd_fill_app", return_value=1),
+                patch("wukong_invite.cli.time.time", side_effect=[100.0, 100.1]),
+                patch("sys.stderr", new_callable=io.StringIO) as stderr,
+                patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                exit_code = cli.watch(
+                    js_url="https://example.com/invite-code",
+                    interval=0,
+                    timeout_seconds=1,
+                    project_root=project_root,
+                    seen_ids_file=seen_ids_file,
+                )
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("autofill error", stderr.getvalue())
+
+    def test_watch_times_out_while_waiting_for_next_release(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            seen_ids_file = project_root / "data" / "seen_ids.txt"
+
+            with (
+                patch(
+                    "wukong_invite.cli.fetch_text",
+                    side_effect=[
+                        '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__",'
+                        '"nextReleaseAt":"2026-04-02T02:00:00.000Z"}',
+                        '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__",'
+                        '"nextReleaseAt":"2026-04-02T02:00:00.000Z"}',
+                    ],
+                ),
                 patch("wukong_invite.cli.time.sleep"),
                 patch(
                     "wukong_invite.cli.time.time",
-                    side_effect=[100.0, 100.1, 100.2, 101.1],
+                    side_effect=[100.0, 100.1, 101.2],
                 ),
                 patch("sys.stderr", new_callable=io.StringIO) as stderr,
             ):
                 exit_code = cli.watch(
-                    js_url="https://example.com/invite.js",
+                    js_url="https://example.com/invite-code",
                     interval=0,
                     timeout_seconds=1,
                     project_root=project_root,
                     seen_ids_file=seen_ids_file,
                 )
-                seen_ids_content = seen_ids_file.read_text()
 
         self.assertEqual(exit_code, 1)
-        self.assertEqual(seen_ids_content, "6000000001111\n")
-        self.assertEqual(ocr.recognize_text.call_count, 2)
-        self.assertIn("timeout without invite code", stderr.getvalue())
-
-    def test_watch_prints_and_triggers_notify_and_fill_on_new_asset(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_root = Path(temp_dir)
-            seen_ids_file = project_root / "data" / "seen_ids.txt"
-            seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
-            seen_ids_file.write_text("6000000001111\n")
-
-            ocr = unittest.mock.Mock()
-            ocr.recognize_text.return_value = "当前邀请码：春江花月夜"
-
-            with (
-                patch("wukong_invite.cli.create_ocr", return_value=ocr),
-                patch(
-                    "wukong_invite.cli.fetch_text",
-                    side_effect=[
-                        'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01NewAsset_!!6000000009999-2-tps-1773-540.png"})',
-                    ],
-                ),
-                patch("wukong_invite.cli.download_file"),
-                patch("wukong_invite.cli.copy_to_clipboard", create=True) as copy_mock,
-                patch("wukong_invite.cli.play_alert", create=True) as alert_mock,
-                patch(
-                    "wukong_invite.cli.cmd_fill_app", return_value=0, create=True
-                ) as fill_mock,
-                patch("wukong_invite.cli.time.time", side_effect=[100.0, 100.1]),
-                patch("sys.stdout", new_callable=io.StringIO) as stdout,
-            ):
-                exit_code = cli.watch(
-                    js_url="https://example.com/invite.js",
-                    interval=0,
-                    timeout_seconds=1,
-                    project_root=project_root,
-                    seen_ids_file=seen_ids_file,
-                )
-                seen_ids_content = seen_ids_file.read_text()
-
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout.getvalue(), "春江花月夜\n")
-        copy_mock.assert_called_once_with("春江花月夜")
-        alert_mock.assert_called_once_with("Glass")
-        fill_mock.assert_called_once_with("春江花月夜", no_submit=False)
-        self.assertEqual(seen_ids_content, "6000000001111\n6000000009999\n")
+        self.assertIn("2026-04-02T02:00:00.000Z", stderr.getvalue())
 
 
 class WebWatchServiceTests(unittest.TestCase):
-    def test_manual_retry_processes_current_seen_asset_after_clear(self) -> None:
+    def test_manual_retry_returns_direct_code_from_json_payload(self) -> None:
         from wukong_invite.webui import InviteWatchService
 
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
             seen_ids_file = project_root / "data" / "seen_ids.txt"
-            seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
-            seen_ids_file.write_text("6000000009999\n")
 
-            ocr = unittest.mock.Mock()
-            ocr.recognize_text.return_value = "当前邀请码：春江花月夜"
+            service = InviteWatchService(
+                project_root=project_root,
+                seen_ids_file=seen_ids_file,
+                fetch_text_func=lambda _url: '{"code":"春江花月夜"}',
+                notify_func=lambda _code: None,
+            )
+
+            result = service.retry_now()
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["code"], "春江花月夜")
+        self.assertEqual(service.snapshot()["latest_code"], "春江花月夜")
+        self.assertEqual(service.snapshot()["last_result"], "ok")
+
+    def test_manual_retry_reports_waiting_until_next_release(self) -> None:
+        from wukong_invite.webui import InviteWatchService
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            seen_ids_file = project_root / "data" / "seen_ids.txt"
 
             service = InviteWatchService(
                 project_root=project_root,
                 seen_ids_file=seen_ids_file,
                 fetch_text_func=lambda _url: (
-                    'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})'
+                    '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__",'
+                    '"nextReleaseAt":"2026-04-02T02:00:00.000Z"}'
                 ),
-                download_file_func=lambda _url, _path: None,
-                create_ocr_func=lambda _root: ocr,
                 notify_func=lambda _code: None,
             )
 
-            self.assertTrue(service.clear_seen_id("6000000009999"))
             result = service.retry_now()
-            seen_ids_content = seen_ids_file.read_text()
 
-        self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["code"], "春江花月夜")
-        self.assertEqual(seen_ids_content, "6000000009999\n")
-        self.assertEqual(service.snapshot()["latest_code"], "春江花月夜")
+        self.assertEqual(result["status"], "waiting")
+        self.assertEqual(result["next_release_at"], "2026-04-02T02:00:00.000Z")
+        self.assertEqual(service.snapshot()["last_result"], "waiting")
 
     def test_start_and_stop_toggle_running_state(self) -> None:
         from wukong_invite.webui import InviteWatchService
@@ -466,10 +532,9 @@ class WebWatchServiceTests(unittest.TestCase):
                 seen_ids_file=seen_ids_file,
                 interval=0.01,
                 fetch_text_func=lambda _url: (
-                    'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Seen_!!6000000001111-2-tps-1773-540.png"})'
+                    '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__",'
+                    '"nextReleaseAt":"2026-04-02T02:00:00.000Z"}'
                 ),
-                download_file_func=lambda _url, _path: None,
-                create_ocr_func=lambda _root: unittest.mock.Mock(),
                 notify_func=lambda _code: None,
             )
 
@@ -480,27 +545,18 @@ class WebWatchServiceTests(unittest.TestCase):
 
 
 class WebAPITests(unittest.TestCase):
-    def test_http_api_supports_state_start_stop_retry_and_clear(self) -> None:
+    def test_http_api_supports_state_start_stop_and_retry(self) -> None:
         from wukong_invite.webui import InviteWatchService, create_http_server
 
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir)
             seen_ids_file = project_root / "data" / "seen_ids.txt"
-            seen_ids_file.parent.mkdir(parents=True, exist_ok=True)
-            seen_ids_file.write_text("6000000009999\n")
-
-            ocr = unittest.mock.Mock()
-            ocr.recognize_text.return_value = "当前邀请码：春江花月夜"
 
             service = InviteWatchService(
                 project_root=project_root,
                 seen_ids_file=seen_ids_file,
                 interval=0.01,
-                fetch_text_func=lambda _url: (
-                    'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01Latest_!!6000000009999-2-tps-1773-540.png"})'
-                ),
-                download_file_func=lambda _url, _path: None,
-                create_ocr_func=lambda _root: ocr,
+                fetch_text_func=lambda _url: '{"code":"春江花月夜"}',
                 notify_func=lambda _code: None,
             )
 
@@ -518,15 +574,6 @@ class WebAPITests(unittest.TestCase):
 
                 stop = self._request_json(host, port, "POST", "/api/stop")
                 self.assertEqual(stop["status"], "ok")
-
-                cleared = self._request_json(
-                    host,
-                    port,
-                    "POST",
-                    "/api/clear-seen-id",
-                    {"asset_id": "6000000009999"},
-                )
-                self.assertEqual(cleared["status"], "ok")
 
                 retry_result = self._request_json(host, port, "POST", "/api/retry")
                 self.assertEqual(retry_result["status"], "ok")
@@ -546,8 +593,6 @@ class WebAPITests(unittest.TestCase):
                 project_root=project_root,
                 seen_ids_file=seen_ids_file,
                 fetch_text_func=lambda _url: "",
-                download_file_func=lambda _url, _path: None,
-                create_ocr_func=lambda _root: unittest.mock.Mock(),
                 notify_func=lambda _code: None,
             )
             server = create_http_server("127.0.0.1", 0, service)
@@ -573,18 +618,15 @@ class WebAPITests(unittest.TestCase):
         self.assertIn("lastSuccessAt", body)
         self.assertIn("toast", body)
         self.assertIn('class="card wide"', body)
-        self.assertLess(body.index("已处理 seen_id"), body.index("最近日志"))
         self.assertIn("logs.scrollTop = logs.scrollHeight", body)
         self.assertIn("setButtonLoading", body)
         self.assertIn("renderLogs", body)
-        self.assertIn("showToast('已清空 seen_id", body)
         self.assertLess(body.index("停止监听"), body.index("手动重试"))
         self.assertIn("console-panel", body)
         self.assertIn("console-actions", body)
-        self.assertIn("开始监听后会按设定间隔持续轮询最新图片", body)
+        self.assertIn("开始监听后会按设定间隔持续轮询邀请码接口", body)
         self.assertIn("停止监听后会结束后台轮询", body)
-        self.assertIn("手动重试会立即对当前最新图片再执行一次 OCR 和提取流程", body)
-        self.assertIn("清空指定 seen_id 后，当前 asset_id 会重新变成可处理状态", body)
+        self.assertIn("手动重试会立即重新请求当前邀请码接口", body)
         self.assertIn("status-pill", body)
         self.assertIn("status-running", body)
         self.assertIn("status-stopped", body)
@@ -613,7 +655,7 @@ class SnatchInviteScriptTests(unittest.TestCase):
             self._write_executable(
                 fake_bin / "curl",
                 """#!/usr/bin/env bash
-exit 1
+printf '%s' '{"code":"__WUKONG_INVITE_CODE_EXHAUSTED__","nextReleaseAt":"2026-04-02T02:00:00.000Z"}'
 """,
             )
             self._write_executable(
@@ -665,94 +707,10 @@ exit 1
         self.assertEqual(result.returncode, 1)
         self.assertIn("starting watcher", result.stderr)
         self.assertIn("poll attempt #1", result.stderr)
+        self.assertIn("next release at 2026-04-02T02:00:00.000Z", result.stderr)
         self.assertIn("timeout without invite code", result.stderr)
 
-    def test_snatch_invite_does_not_persist_seen_id_when_extract_fails(self) -> None:
-        project_root = Path(__file__).resolve().parents[1]
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fake_bin = Path(temp_dir) / "bin"
-            fake_bin.mkdir()
-
-            self._write_executable(
-                fake_bin / "curl",
-                """#!/usr/bin/env bash
-state_file="${TMPDIR:-/tmp}/wukong_test_fake_curl_state"
-count=0
-if [ -f "$state_file" ]; then
-  count="$(cat "$state_file")"
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$state_file"
-if [ "$1" = "-fsSL" ] && [ "$4" = "-o" ]; then
-  printf 'fake image' > "$5"
-  exit 0
-fi
-if [ "$count" -eq 1 ]; then
-  printf '%s' 'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01SeedAsset_!!6000000001111-2-tps-1773-540.png"})'
-else
-  printf '%s' 'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01TestAsset_!!6000000009999-2-tps-1773-540.png"})'
-fi
-""",
-            )
-            self._write_executable(
-                fake_bin / "sleep",
-                """#!/usr/bin/env bash
-exit 0
-""",
-            )
-            self._write_executable(
-                fake_bin / "date",
-                """#!/usr/bin/env bash
-state_file="${TMPDIR:-/tmp}/wukong_test_fake_date_state"
-count=0
-if [ -f "$state_file" ]; then
-  count="$(cat "$state_file")"
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$state_file"
-if [ "$1" = "+%s" ]; then
-  if [ "$count" -le 3 ]; then
-    printf '100\\n'
-  else
-    printf '101\\n'
-  fi
-  exit 0
-fi
-printf 'unsupported fake date args: %s\\n' "$*" >&2
-exit 1
-""",
-            )
-
-            seen_ids_file = Path(temp_dir) / "seen_ids.txt"
-
-            env = os.environ.copy()
-            env["PATH"] = f"{fake_bin}:{env['PATH']}"
-            env["INTERVAL"] = "0"
-            env["TIMEOUT_SECONDS"] = "1"
-            env["TMPDIR"] = temp_dir
-            env["SEEN_IDS_FILE"] = str(seen_ids_file)
-
-            with patch(
-                "wukong_invite.ops.cmd_extract_code",
-                side_effect=ValueError("ocr failed"),
-            ):
-                result = subprocess.run(
-                    ["bash", "scripts/snatch_invite.sh"],
-                    cwd=project_root,
-                    env=env,
-                    text=True,
-                    capture_output=True,
-                    check=False,
-                )
-            seen_ids_content = (
-                seen_ids_file.read_text() if seen_ids_file.exists() else ""
-            )
-
-        self.assertEqual(result.returncode, 1)
-        self.assertNotIn("6000000001111", seen_ids_content)
-        self.assertNotIn("6000000009999", seen_ids_content)
-
-    def test_snatch_invite_persists_seen_id_and_logs_after_success(self) -> None:
+    def test_snatch_invite_returns_direct_code_after_json_ready(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             project_root = Path(temp_dir) / "project"
             scripts_dir = project_root / "scripts"
@@ -784,17 +742,18 @@ exit 1
 if [ "$1" = "-m" ] && [ "$2" = "wukong_invite.ops" ]; then
   shift 2
   case "$1" in
-    parse-js)
-      printf '%s\n' 'https://gw.alicdn.com/imgextra/i2/O1CN01SuccessAsset_!!6000000009999-2-tps-1773-540.png'
-      exit 0
-      ;;
-    image-key)
-      printf '%s\n' '6000000009999'
-      exit 0
-      ;;
-    extract-code)
-      printf '%s\n' '春江花月夜'
-      exit 0
+    parse-api)
+      if [ "$2" = "--field" ] && [ "$3" = "code" ]; then
+        printf '%s\n' '春江花月夜'
+        exit 0
+      fi
+      if [ "$2" = "--field" ] && [ "$3" = "next-release" ]; then
+        exit 0
+      fi
+      if [ "$2" = "--field" ] && [ "$3" = "raw-code" ]; then
+        exit 0
+      fi
+      exit 1
       ;;
     notify|fill-app)
       exit 0
@@ -811,11 +770,7 @@ exit 1
             self._write_executable(
                 fake_bin / "curl",
                 """#!/usr/bin/env bash
-if [ "$1" = "-fsSL" ] && [ "$4" = "-o" ]; then
-  printf 'fake image' > "$5"
-  exit 0
-fi
-printf '%s' 'img_url({"img_url":"https://gw.alicdn.com/imgextra/i2/O1CN01SuccessAsset_!!6000000009999-2-tps-1773-540.png"})'
+printf '%s' '{"code":"春江花月夜"}'
 """,
             )
             self._write_executable(
@@ -843,14 +798,11 @@ exit 1
 """,
             )
 
-            seen_ids_file = Path(temp_dir) / "seen_ids.txt"
-
             env = os.environ.copy()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             env["INTERVAL"] = "0"
             env["TIMEOUT_SECONDS"] = "1"
             env["TMPDIR"] = temp_dir
-            env["SEEN_IDS_FILE"] = str(seen_ids_file)
             env["ENABLE_CLIPBOARD"] = "0"
             env["ENABLE_SOUND"] = "0"
             env["AUTO_FILL_APP"] = "0"
@@ -863,14 +815,10 @@ exit 1
                 capture_output=True,
                 check=False,
             )
-            seen_ids_content = (
-                seen_ids_file.read_text() if seen_ids_file.exists() else ""
-            )
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("春江花月夜", result.stdout)
-        self.assertIn("6000000009999", seen_ids_content)
-        self.assertIn("saved seen asset id [6000000009999]", result.stderr)
+        self.assertIn("invite code ready [春江花月夜]", result.stderr)
 
     def test_start_bat_is_ascii_only_for_cmd_compatibility(self) -> None:
         launcher = Path(__file__).resolve().parents[1] / "start.bat"
